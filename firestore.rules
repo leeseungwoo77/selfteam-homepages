@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function myProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isLeader() { return isSignedIn() && myProfile().role == 'leader'; }
+    function myBranch() { return myProfile().branchId; }
+
+    // 사용자 프로필: 본인은 생성 가능, 본인 또는 팀장은 읽기/수정 가능
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && (request.auth.uid == userId || isLeader());
+      allow delete: if isLeader();
+    }
+
+    // 지점 목록: 회원가입 화면에서 선택해야 하므로 누구나 읽기 가능, 쓰기는 팀장만
+    match /branches/{branchId} {
+      allow read: if true;
+      allow write: if isLeader();
+    }
+
+    // 팀 전체 공용 자료 - 팀장만 작성/수정 (팀장 일정, 공지사항, 리더십 자료)
+    match /schedules/{id}   { allow read: if isSignedIn(); allow write: if isLeader(); }
+    match /notices/{id}     { allow read: if isSignedIn(); allow write: if isLeader(); }
+    match /leadership/{id}  { allow read: if isSignedIn(); allow write: if isLeader(); }
+
+    // 팀 전체 협업 자료 - 로그인한 누구나 작성/수정 (팀 회의 일지, 스터디 자료)
+    match /teamMeetings/{id} { allow read, write: if isSignedIn(); }
+    match /study/{id}        { allow read, write: if isSignedIn(); }
+
+    // 지점별 데이터 - 팀장은 전체, 팀원은 자기 담당 지점 데이터만
+    match /directorMeetings/{id} { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
+                                    allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
+    match /memberMeetings/{id}   { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
+                                    allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
+    match /performance/{id}      { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
+                                    allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
+    match /operations/{id}       { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
+                                    allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
+  }
+}
