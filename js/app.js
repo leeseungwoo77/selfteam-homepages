@@ -27,12 +27,14 @@ const SECTIONS = [
   { key:"teamMeeting", label:"팀 회의 일지", group:"일정 · 미팅", color:"green",
     collectionName:"teamMeetings", scope:"team", writable:"all",
     desc:"팀 전체 회의 내용을 기록합니다.",
+    isMeetingLog:true,
     fields:[
       { key:"date", label:"날짜", type:"date" },
       { key:"attendees", label:"참석자", type:"text" },
       { key:"agenda", label:"안건", type:"textarea" },
       { key:"decisions", label:"결정사항", type:"textarea" },
-      { key:"followUp", label:"후속조치", type:"textarea" }
+      { key:"followUp", label:"후속조치", type:"textarea" },
+      { key:"images", label:"회의 슬라이드 이미지 (구글 드라이브 링크, 줄바꿈으로 여러 개)", type:"driveImages" }
     ], columns:["date","attendees","agenda"] },
 
   { key:"directorMeeting", label:"지점 원장 미팅 일지", group:"일정 · 미팅", color:"green",
@@ -425,6 +427,7 @@ async function renderSection(key) {
 
   const section = SECTIONS.find(s => s.key === key);
   if (section.isScheduleSheet) { renderScheduleSheet(section); return; }
+  if (section.isMeetingLog) { renderMeetingLog(section); return; }
   main.innerHTML = `<div class="page-header">
       <div>
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
@@ -523,11 +526,79 @@ function renderTable(section, docs) {
   });
 }
 
+/* ===================== 팀 회의 일지 - 카드형 인라인 렌더러 (팝업 없이 바로 표시) ===================== */
+function driveDirectUrl(link) {
+  const str = String(link || "").trim();
+  const m = str.match(/\/d\/([a-zA-Z0-9_-]+)/) || str.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  return m ? `https://drive.google.com/uc?export=view&id=${m[1]}` : str;
+}
+
+async function renderMeetingLog(section) {
+  const main = document.getElementById("mainContent");
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <p>${section.desc}</p>
+      </div>
+      ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
+    </div>
+    <div id="meetingList">불러오는 중...</div>`;
+
+  if (canWriteSection(section)) {
+    document.getElementById("addBtn").onclick = () => openModal(section, null);
+  }
+
+  const docs = await fetchDocs(section);
+  const wrap = document.getElementById("meetingList");
+  if (!docs.length) {
+    wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>아직 등록된 회의 일지가 없습니다.</div></div>`;
+    return;
+  }
+
+  wrap.innerHTML = docs.map(d => {
+    const editable = canEditDoc(section, d);
+    const images = (d.images || []).filter(Boolean);
+    return `<div class="card meeting-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:800;font-size:15px;">${escapeHtml(d.date || "")} <span style="font-weight:400;color:var(--text-muted);font-size:13px;">· 참석자: ${escapeHtml(d.attendees || "-")}</span></div>
+        </div>
+        ${editable ? `<div>
+          <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
+          <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
+        </div>` : ""}
+      </div>
+      ${d.agenda ? `<p style="margin:12px 0 4px;"><strong>안건</strong><br>${escapeHtml(d.agenda).replace(/\n/g, "<br>")}</p>` : ""}
+      ${d.decisions ? `<p style="margin:12px 0 4px;"><strong>결정사항</strong><br>${escapeHtml(d.decisions).replace(/\n/g, "<br>")}</p>` : ""}
+      ${d.followUp ? `<p style="margin:12px 0 4px;"><strong>후속조치</strong><br>${escapeHtml(d.followUp).replace(/\n/g, "<br>")}</p>` : ""}
+      ${images.length ? `<div class="meeting-gallery">
+        ${images.map(link => `<img src="${driveDirectUrl(link)}" class="meeting-img" loading="lazy" onclick="this.classList.toggle('zoomed')">`).join("")}
+      </div>` : ""}
+    </div>`;
+  }).join("");
+
+  wrap.querySelectorAll('[data-act="edit"]').forEach(btn => {
+    btn.onclick = () => openModal(section, docs.find(d => d.id === btn.dataset.id));
+  });
+  wrap.querySelectorAll('[data-act="del"]').forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm("정말 삭제하시겠습니까?")) return;
+      await deleteDoc(doc(db, section.collectionName, btn.dataset.id));
+      showToast("삭제되었습니다.");
+      renderSection(section.key);
+    };
+  });
+}
+
 /* ===================== 등록/수정 모달 ===================== */
 function fieldInput(field, value) {
   const v = value ?? "";
   if (field.type === "textarea") {
     return `<textarea id="f_${field.key}" rows="3">${escapeHtml(String(v))}</textarea>`;
+  }
+  if (field.type === "driveImages") {
+    const text = Array.isArray(v) ? v.join("\n") : String(v || "");
+    return `<textarea id="f_${field.key}" rows="3" placeholder="https://drive.google.com/file/d/.../view\nhttps://drive.google.com/file/d/.../view">${escapeHtml(text)}</textarea>`;
   }
   if (field.type === "branchSelect") {
     if (state.profile.role !== "leader") {
@@ -559,7 +630,7 @@ function openModal(section, existing) {
       <form id="entryForm">${fieldsHtml}
         <div class="grid-2" style="margin-top:10px;">
           <button type="button" class="btn secondary" id="cancelBtn">취소</button>
-          <button type="submit" class="btn">저장</button>
+          <button type="submit" class="btn" id="saveBtn">저장</button>
         </div>
       </form>
     </div></div>`;
@@ -569,24 +640,31 @@ function openModal(section, existing) {
 
   document.getElementById("entryForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const data = {};
-    section.fields.forEach(f => {
-      const el = document.getElementById(`f_${f.key}`);
-      data[f.key] = el ? el.value : "";
-    });
-    if (section.scope === "branch") {
-      if (state.profile.role !== "leader") {
-        data.branchId = state.profile.branchId;
-        data.branchName = state.profile.branchName;
-      } else {
-        const b = state.branches.find(x => x.id === data.branchId);
-        data.branchName = b ? b.name : "";
-      }
-    }
-    data.updatedAt = new Date().toISOString();
-    data.updatedBy = state.profile.name;
-
+    const saveBtn = document.getElementById("saveBtn");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "저장 중...";
     try {
+      const data = {};
+      section.fields.forEach(f => {
+        const el = document.getElementById(`f_${f.key}`);
+        if (f.type === "driveImages") {
+          data[f.key] = el ? el.value.split("\n").map(s => s.trim()).filter(Boolean) : [];
+        } else {
+          data[f.key] = el ? el.value : "";
+        }
+      });
+      if (section.scope === "branch") {
+        if (state.profile.role !== "leader") {
+          data.branchId = state.profile.branchId;
+          data.branchName = state.profile.branchName;
+        } else {
+          const b = state.branches.find(x => x.id === data.branchId);
+          data.branchName = b ? b.name : "";
+        }
+      }
+      data.updatedAt = new Date().toISOString();
+      data.updatedBy = state.profile.name;
+
       if (existing) {
         await updateDoc(doc(db, section.collectionName, existing.id), data);
       } else {
@@ -599,9 +677,12 @@ function openModal(section, existing) {
       renderSection(section.key);
     } catch (err) {
       alert("저장 중 오류: " + err.message);
+      saveBtn.disabled = false;
+      saveBtn.textContent = "저장";
     }
   });
 }
+
 
 /* ===================== 관리자 화면 (지점 / 팀원) ===================== */
 async function renderAdmin() {

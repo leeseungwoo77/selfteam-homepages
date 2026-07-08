@@ -173,6 +173,19 @@ td.actions { white-space: nowrap; text-align: right; }
 
 .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text-main); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 13px; z-index: 80; }
 
+/* ---------- 팀 회의 일지 카드 ---------- */
+.meeting-card { }
+.meeting-card p { font-size: 13.5px; line-height: 1.6; }
+.meeting-gallery { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.meeting-img {
+  width: 220px; max-width: 100%; border-radius: 10px; border: 1px solid var(--border);
+  cursor: zoom-in; transition: all .2s ease; object-fit: cover; height: 150px;
+}
+.meeting-img.zoomed {
+  width: 100%; height: auto; max-height: 80vh; object-fit: contain; cursor: zoom-out;
+  background: #F4FAEF;
+}
+
 @media (max-width: 860px) {
   .app { flex-direction: column; }
   .sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; }
