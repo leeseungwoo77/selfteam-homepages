@@ -110,28 +110,60 @@ const SECTIONS = [
 const GROUP_ORDER = ["일정 · 미팅", "성과", "소통", "자료실"];
 const COLOR_HEX = { blue:"var(--blue-bright)", green:"var(--green-bright)", magenta:"var(--magenta-bright)", neutral:"#9CA88F" };
 
-/* ===================== 팀장 일정 - 구글 시트 연동 =====================
-   시트 하나(연도별 탭)에 그 해의 모든 날짜가 열로 쭉 이어져 있는 구조.
-   1행의 "MM. DD(요일)" 텍스트에서 월을 읽어 화면에서 필터링합니다.
-   연도(탭)가 늘어날 때마다 "팀장 일정" 화면에서 팀장이 라벨+gid를 등록합니다.
+/* ===================== 팀장 일정 - 구글 시트 연동 (OAuth) =====================
+   회사 도메인으로만 공유된 시트라, 사용자가 직접 구글 로그인(OAuth)해서
+   Sheets API로 읽어옵니다. 시트 하나(연도별 탭)에 그 해의 모든 날짜가
+   열로 쭉 이어져 있고, 1행의 "MM. DD(요일)" 텍스트에서 월을 읽어 필터링합니다.
 =========================================================== */
 const SPREADSHEET_ID = "1pH_H7JJhT_1rMUyO05FSbHJeYuHUWoZ2gRBw8XWcea0";
+const GOOGLE_CLIENT_ID = "708745145673-j0ljnhqsl7gg0djq5p9j7uop040thqbe.apps.googleusercontent.com";
+const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
 const LOCATION_COLORS = {
   "에듀본사": "#E03C3C", "상상": "#F5A623", "전능": "#2E6FE0",
   "돈암": "#3FA33F", "행당": "#D3339C", "별내": "#E8D227", "다산": "#8E1E1E"
 };
 
-function loadGvizSheet(gid) {
-  return new Promise((resolve, reject) => {
-    const cbName = "__gviz_cb_" + Math.random().toString(36).slice(2);
-    const timer = setTimeout(() => { cleanup(); reject(new Error("시트를 불러오는 데 시간이 너무 오래 걸립니다. 공유 설정을 확인해주세요.")); }, 10000);
-    function cleanup() { clearTimeout(timer); delete window[cbName]; script.remove(); }
-    window[cbName] = (resp) => { cleanup(); resolve(resp); };
-    const script = document.createElement("script");
-    script.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json;responseHandler:${cbName}&gid=${encodeURIComponent(gid)}&headers=0`;
-    script.onerror = () => { cleanup(); reject(new Error("시트를 불러오지 못했습니다. 공유 설정(상상플렉스 도메인 보기)을 확인해주세요.")); };
-    document.body.appendChild(script);
+let googleTokenClient = null;
+let googleAccessToken = null;
+
+function ensureGoogleTokenClient() {
+  if (googleTokenClient || !window.google) return;
+  googleTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: SHEETS_SCOPE,
+    callback: () => {} // requestGoogleAuth 안에서 그때그때 덮어씀
   });
+}
+
+function requestGoogleAuth() {
+  return new Promise((resolve, reject) => {
+    ensureGoogleTokenClient();
+    if (!googleTokenClient) { reject(new Error("구글 로그인 모듈을 아직 불러오지 못했습니다. 잠시 후 다시 시도해주세요.")); return; }
+    googleTokenClient.callback = (resp) => {
+      if (resp.error) { reject(new Error("구글 인증에 실패했습니다: " + resp.error)); return; }
+      googleAccessToken = resp.access_token;
+      resolve(googleAccessToken);
+    };
+    googleTokenClient.requestAccessToken({ prompt: googleAccessToken ? "" : "consent" });
+  });
+}
+
+async function fetchSheetValues(sheetName) {
+  if (!googleAccessToken) await requestGoogleAuth();
+  const range = encodeURIComponent(`${sheetName}!A1:BZ3000`);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`;
+  let res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
+  if (res.status === 401) {
+    googleAccessToken = null;
+    await requestGoogleAuth();
+    res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error?.message || `시트를 불러오지 못했습니다 (${res.status})`);
+  }
+  const data = await res.json();
+  return data.values || [];
 }
 
 function parseMonthFromHeader(str) {
@@ -146,7 +178,8 @@ async function renderScheduleSheet(section) {
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
         <p>${section.desc}</p>
       </div>
-      <div style="display:flex;gap:8px;">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
         <select id="yearSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
         <select id="monthSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
       </div>
@@ -156,13 +189,23 @@ async function renderScheduleSheet(section) {
       <h2>연도 탭 등록/관리</h2>
       <form id="sheetAddForm" class="grid-3" style="align-items:end;">
         <div class="field" style="margin:0;"><label>표시 이름 (예: 2026년)</label><input type="text" id="newSheetLabel" required></div>
-        <div class="field" style="margin:0;"><label>구글 시트 gid</label><input type="text" id="newSheetGid" placeholder="예: 1621800333" required></div>
+        <div class="field" style="margin:0;"><label>구글 시트 탭 이름</label><input type="text" id="newSheetGid" placeholder="예: 2026년" required></div>
         <button class="btn" type="submit">추가</button>
       </form>
-      <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">gid는 구글 시트에서 해당 연도 탭을 클릭했을 때 주소창 맨 끝 <span class="mono">#gid=숫자</span> 부분입니다.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">시트 아래쪽 탭에 표시된 이름을 그대로 입력하세요 (예: 2026년).</p>
       <div id="sheetList" style="margin-top:14px;"></div>
     </div>` : ""}
-    <div class="card" style="overflow-x:auto;"><div id="sheetTableWrap">불러오는 중...</div></div>`;
+    <div class="card" style="overflow-x:auto;"><div id="sheetTableWrap">${googleAccessToken ? "불러오는 중..." : "오른쪽 위 \"구글 계정으로 연결\" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요."}</div></div>`;
+
+  document.getElementById("googleAuthBtn").onclick = async () => {
+    try {
+      await requestGoogleAuth();
+      showToast("구글 계정이 연결되었습니다.");
+      renderScheduleSheet(section);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
 
   const yearsSnap = await getDocs(collection(db, "scheduleSheets"));
   const years = yearsSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
@@ -174,11 +217,11 @@ async function renderScheduleSheet(section) {
   if (!years.length) {
     yearSelect.innerHTML = `<option value="">등록된 연도가 없습니다</option>`;
     monthSelect.innerHTML = "";
-    tableWrap.innerHTML = `<div class="empty-state"><div class="shape"></div>등록된 연도가 없습니다. ${state.profile.role === "leader" ? "위에서 연도를 먼저 등록해주세요." : "팀장에게 문의해주세요."}</div>`;
+    if (googleAccessToken) tableWrap.innerHTML = `<div class="empty-state"><div class="shape"></div>등록된 연도가 없습니다. ${state.profile.role === "leader" ? "위에서 연도를 먼저 등록해주세요." : "팀장에게 문의해주세요."}</div>`;
   } else {
-    yearSelect.innerHTML = years.map(y => `<option value="${y.gid}">${escapeHtml(y.label)}</option>`).join("");
+    yearSelect.innerHTML = years.map(y => `<option value="${escapeHtml(y.gid)}">${escapeHtml(y.label)}</option>`).join("");
     yearSelect.onchange = () => loadYearData(yearSelect.value);
-    await loadYearData(years[years.length - 1].gid);
+    if (googleAccessToken) await loadYearData(years[years.length - 1].gid);
   }
 
   if (state.profile.role === "leader") {
@@ -197,20 +240,13 @@ async function renderScheduleSheet(section) {
 
 let currentSheetRows = null;
 
-async function loadYearData(gid) {
+async function loadYearData(sheetName) {
   const tableWrap = document.getElementById("sheetTableWrap");
   const monthSelect = document.getElementById("monthSelect");
-  if (!gid) { tableWrap.innerHTML = `<div class="empty-state">표시할 연도를 선택해주세요.</div>`; return; }
+  if (!sheetName) { tableWrap.innerHTML = `<div class="empty-state">표시할 연도를 선택해주세요.</div>`; return; }
   tableWrap.innerHTML = `<div class="empty-state"><div class="shape"></div>불러오는 중...</div>`;
   try {
-    const resp = await loadGvizSheet(gid);
-    if (!resp || !resp.table || !Array.isArray(resp.table.rows)) {
-      console.error("gviz raw response:", resp);
-      const detail = resp && resp.errors ? resp.errors.map(e => e.detailed_message || e.message).join(" / ") : JSON.stringify(resp);
-      tableWrap.innerHTML = `<div class="empty-state">구글 시트 응답을 해석하지 못했습니다.<br><span class="mono" style="font-size:12px;">${escapeHtml(detail || "빈 응답")}</span></div>`;
-      return;
-    }
-    const rows = resp.table.rows.map(r => r.c.map(c => (c ? (c.f ?? c.v ?? "") : "")));
+    const rows = await fetchSheetValues(sheetName);
     if (!rows.length) { tableWrap.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
     currentSheetRows = rows;
 
@@ -274,7 +310,7 @@ function renderFilteredMonthTable(month) {
 function renderSheetList(years) {
   const wrap = document.getElementById("sheetList");
   if (!years.length) { wrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 등록된 연도가 없습니다.</p>`; return; }
-  wrap.innerHTML = `<table><thead><tr><th>표시 이름</th><th>gid</th><th></th></tr></thead><tbody>
+  wrap.innerHTML = `<table><thead><tr><th>표시 이름</th><th>탭 이름</th><th></th></tr></thead><tbody>
     ${years.map(y => `<tr><td>${escapeHtml(y.label)}</td><td class="mono">${escapeHtml(y.gid)}</td>
       <td class="actions"><button class="icon-btn danger" data-sid="${y.id}">삭제</button></td></tr>`).join("")}
   </tbody></table>`;
@@ -287,6 +323,7 @@ function renderSheetList(years) {
     };
   });
 }
+
 
 /* ===================== 전역 상태 ===================== */
 const state = { user:null, profile:null, branches:[], currentSection:"schedule" };
