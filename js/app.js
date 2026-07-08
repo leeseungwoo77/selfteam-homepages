@@ -111,8 +111,9 @@ const GROUP_ORDER = ["일정 · 미팅", "성과", "소통", "자료실"];
 const COLOR_HEX = { blue:"var(--blue-bright)", green:"var(--green-bright)", magenta:"var(--magenta-bright)", neutral:"#9CA88F" };
 
 /* ===================== 팀장 일정 - 구글 시트 연동 =====================
-   스프레드시트 자체는 아래 SPREADSHEET_ID 하나로 고정.
-   달(탭)이 늘어날 때마다 "팀장 일정" 화면에서 팀장이 직접 라벨+gid를 등록합니다.
+   시트 하나(연도별 탭)에 그 해의 모든 날짜가 열로 쭉 이어져 있는 구조.
+   1행의 "MM. DD(요일)" 텍스트에서 월을 읽어 화면에서 필터링합니다.
+   연도(탭)가 늘어날 때마다 "팀장 일정" 화면에서 팀장이 라벨+gid를 등록합니다.
 =========================================================== */
 const SPREADSHEET_ID = "1pH_H7JJhT_1rMUyO05FSbHJeYuHUWoZ2gRBw8XWcea0";
 const LOCATION_COLORS = {
@@ -133,6 +134,11 @@ function loadGvizSheet(gid) {
   });
 }
 
+function parseMonthFromHeader(str) {
+  const m = String(str).match(/^(\d{1,2})\s*\.\s*(\d{1,2})/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
 async function renderScheduleSheet(section) {
   const main = document.getElementById("mainContent");
   main.innerHTML = `<div class="page-header">
@@ -140,99 +146,140 @@ async function renderScheduleSheet(section) {
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
         <p>${section.desc}</p>
       </div>
-      <select id="monthSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
+      <div style="display:flex;gap:8px;">
+        <select id="yearSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
+        <select id="monthSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
+      </div>
     </div>
     ${state.profile.role === "leader" ? `
     <div class="card" id="sheetAdminCard">
-      <h2>월 탭 등록/관리</h2>
+      <h2>연도 탭 등록/관리</h2>
       <form id="sheetAddForm" class="grid-3" style="align-items:end;">
-        <div class="field" style="margin:0;"><label>표시 이름 (예: 2026년 7월)</label><input type="text" id="newSheetLabel" required></div>
+        <div class="field" style="margin:0;"><label>표시 이름 (예: 2026년)</label><input type="text" id="newSheetLabel" required></div>
         <div class="field" style="margin:0;"><label>구글 시트 gid</label><input type="text" id="newSheetGid" placeholder="예: 1621800333" required></div>
         <button class="btn" type="submit">추가</button>
       </form>
-      <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">gid는 구글 시트에서 해당 달 탭을 클릭했을 때 주소창 맨 끝 <span class="mono">#gid=숫자</span> 부분입니다.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">gid는 구글 시트에서 해당 연도 탭을 클릭했을 때 주소창 맨 끝 <span class="mono">#gid=숫자</span> 부분입니다.</p>
       <div id="sheetList" style="margin-top:14px;"></div>
     </div>` : ""}
     <div class="card" style="overflow-x:auto;"><div id="sheetTableWrap">불러오는 중...</div></div>`;
 
-  const monthsSnap = await getDocs(collection(db, "scheduleSheets"));
-  const months = monthsSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
+  const yearsSnap = await getDocs(collection(db, "scheduleSheets"));
+  const years = yearsSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
 
-  const select = document.getElementById("monthSelect");
-  if (!months.length) {
-    select.innerHTML = `<option value="">등록된 월이 없습니다</option>`;
+  const yearSelect = document.getElementById("yearSelect");
+  const monthSelect = document.getElementById("monthSelect");
+  const tableWrap = document.getElementById("sheetTableWrap");
+
+  if (!years.length) {
+    yearSelect.innerHTML = `<option value="">등록된 연도가 없습니다</option>`;
+    monthSelect.innerHTML = "";
+    tableWrap.innerHTML = `<div class="empty-state"><div class="shape"></div>등록된 연도가 없습니다. ${state.profile.role === "leader" ? "위에서 연도를 먼저 등록해주세요." : "팀장에게 문의해주세요."}</div>`;
   } else {
-    select.innerHTML = months.map(m => `<option value="${m.gid}">${escapeHtml(m.label)}</option>`).join("");
+    yearSelect.innerHTML = years.map(y => `<option value="${y.gid}">${escapeHtml(y.label)}</option>`).join("");
+    yearSelect.onchange = () => loadYearData(yearSelect.value);
+    await loadYearData(years[years.length - 1].gid);
   }
-  select.onchange = () => loadAndRenderSheetTable(select.value);
-  if (months.length) loadAndRenderSheetTable(months[months.length - 1].gid);
-  else document.getElementById("sheetTableWrap").innerHTML = `<div class="empty-state"><div class="shape"></div>등록된 월이 없습니다. ${state.profile.role === "leader" ? "위에서 월을 먼저 등록해주세요." : "팀장에게 문의해주세요."}</div>`;
 
   if (state.profile.role === "leader") {
-    renderSheetList(months);
+    renderSheetList(years);
     document.getElementById("sheetAddForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const label = document.getElementById("newSheetLabel").value.trim();
       const gid = document.getElementById("newSheetGid").value.trim();
       if (!label || !gid) return;
       await addDoc(collection(db, "scheduleSheets"), { label, gid, createdAt: new Date().toISOString() });
-      showToast("월이 등록되었습니다.");
+      showToast("연도가 등록되었습니다.");
       renderScheduleSheet(section);
     });
   }
 }
 
-function renderSheetList(months) {
+let currentSheetRows = null;
+
+async function loadYearData(gid) {
+  const tableWrap = document.getElementById("sheetTableWrap");
+  const monthSelect = document.getElementById("monthSelect");
+  if (!gid) { tableWrap.innerHTML = `<div class="empty-state">표시할 연도를 선택해주세요.</div>`; return; }
+  tableWrap.innerHTML = `<div class="empty-state"><div class="shape"></div>불러오는 중...</div>`;
+  try {
+    const resp = await loadGvizSheet(gid);
+    const rows = resp.table.rows.map(r => r.c.map(c => (c ? (c.f ?? c.v ?? "") : "")));
+    if (!rows.length) { tableWrap.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
+    currentSheetRows = rows;
+
+    // 1행에서 등장하는 월 목록 추출 (등장 순서 유지, 중복 제거)
+    const header = rows[0];
+    const monthsSeen = [];
+    for (let ci = 1; ci < header.length; ci++) {
+      const mo = parseMonthFromHeader(header[ci]);
+      if (mo && !monthsSeen.includes(mo)) monthsSeen.push(mo);
+    }
+    if (!monthsSeen.length) {
+      tableWrap.innerHTML = `<div class="empty-state">1행에서 날짜(월) 형식을 인식하지 못했습니다. (예상 형식: 03. 02(월))</div>`;
+      monthSelect.innerHTML = "";
+      return;
+    }
+    monthSelect.innerHTML = monthsSeen.map(m => `<option value="${m}">${m}월</option>`).join("");
+    const thisMonth = new Date().getMonth() + 1;
+    monthSelect.value = monthsSeen.includes(thisMonth) ? String(thisMonth) : String(monthsSeen[0]);
+    monthSelect.onchange = () => renderFilteredMonthTable(parseInt(monthSelect.value, 10));
+    renderFilteredMonthTable(parseInt(monthSelect.value, 10));
+  } catch (err) {
+    tableWrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderFilteredMonthTable(month) {
+  const wrap = document.getElementById("sheetTableWrap");
+  if (!currentSheetRows) return;
+  const header = currentSheetRows[0];
+  const colIndexes = [0]; // 0번 열(행 라벨)은 항상 포함
+  for (let ci = 1; ci < header.length; ci++) {
+    if (parseMonthFromHeader(header[ci]) === month) colIndexes.push(ci);
+  }
+  if (colIndexes.length <= 1) { wrap.innerHTML = `<div class="empty-state">${month}월 데이터가 없습니다.</div>`; return; }
+
+  let html = `<table style="min-width:900px;"><thead><tr>`;
+  colIndexes.forEach(ci => {
+    const str = String(header[ci] ?? "");
+    let style = "position:sticky;top:0;background:#F4FAEF;";
+    if (str.includes("(토)")) style += "color:var(--blue-deep);";
+    if (str.includes("(일)")) style += "color:var(--danger);";
+    html += `<th style="${style}">${escapeHtml(str)}</th>`;
+  });
+  html += `</tr></thead><tbody>`;
+  for (let ri = 1; ri < currentSheetRows.length; ri++) {
+    const row = currentSheetRows[ri];
+    html += `<tr>`;
+    colIndexes.forEach((ci, idx) => {
+      const str = String(row[ci] ?? "");
+      const isRowLabel = idx === 0;
+      let style = isRowLabel ? "font-weight:700;white-space:nowrap;position:sticky;left:0;background:#fff;" : "white-space:nowrap;";
+      if (LOCATION_COLORS[str]) style += `background:${LOCATION_COLORS[str]};color:#fff;font-weight:700;border-radius:4px;`;
+      html += `<td style="${style}">${escapeHtml(str)}</td>`;
+    });
+    html += `</tr>`;
+  }
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
+}
+
+function renderSheetList(years) {
   const wrap = document.getElementById("sheetList");
-  if (!months.length) { wrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 등록된 월이 없습니다.</p>`; return; }
+  if (!years.length) { wrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 등록된 연도가 없습니다.</p>`; return; }
   wrap.innerHTML = `<table><thead><tr><th>표시 이름</th><th>gid</th><th></th></tr></thead><tbody>
-    ${months.map(m => `<tr><td>${escapeHtml(m.label)}</td><td class="mono">${escapeHtml(m.gid)}</td>
-      <td class="actions"><button class="icon-btn danger" data-sid="${m.id}">삭제</button></td></tr>`).join("")}
+    ${years.map(y => `<tr><td>${escapeHtml(y.label)}</td><td class="mono">${escapeHtml(y.gid)}</td>
+      <td class="actions"><button class="icon-btn danger" data-sid="${y.id}">삭제</button></td></tr>`).join("")}
   </tbody></table>`;
   wrap.querySelectorAll("[data-sid]").forEach(btn => {
     btn.onclick = async () => {
-      if (!confirm("이 월 등록을 삭제할까요? (구글 시트 자체는 삭제되지 않습니다)")) return;
+      if (!confirm("이 연도 등록을 삭제할까요? (구글 시트 자체는 삭제되지 않습니다)")) return;
       await deleteDoc(doc(db, "scheduleSheets", btn.dataset.sid));
       showToast("삭제되었습니다.");
       renderScheduleSheet(SECTIONS.find(s => s.key === "schedule"));
     };
   });
-}
-
-async function loadAndRenderSheetTable(gid) {
-  const wrap = document.getElementById("sheetTableWrap");
-  if (!gid) { wrap.innerHTML = `<div class="empty-state">표시할 월을 선택해주세요.</div>`; return; }
-  wrap.innerHTML = `<div class="empty-state"><div class="shape"></div>불러오는 중...</div>`;
-  try {
-    const resp = await loadGvizSheet(gid);
-    const rows = resp.table.rows.map(r => r.c.map(c => (c ? (c.f ?? c.v ?? "") : "")));
-    if (!rows.length) { wrap.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
-
-    let html = `<table style="min-width:900px;"><thead><tr>`;
-    rows[0].forEach((cell, ci) => {
-      let style = "position:sticky;top:0;background:#F4FAEF;";
-      const str = String(cell);
-      if (str.includes("(토)")) style += "color:var(--blue-deep);";
-      if (str.includes("(일)")) style += "color:var(--danger);";
-      html += `<th style="${style}">${escapeHtml(str)}</th>`;
-    });
-    html += `</tr></thead><tbody>`;
-    for (let ri = 1; ri < rows.length; ri++) {
-      html += `<tr>`;
-      rows[ri].forEach((cell, ci) => {
-        const str = String(cell ?? "");
-        const isRowLabel = ci === 0;
-        let style = isRowLabel ? "font-weight:700;white-space:nowrap;position:sticky;left:0;background:#fff;" : "white-space:nowrap;";
-        if (LOCATION_COLORS[str]) style += `background:${LOCATION_COLORS[str]};color:#fff;font-weight:700;border-radius:4px;`;
-        html += `<td style="${style}">${escapeHtml(str)}</td>`;
-      });
-      html += `</tr>`;
-    }
-    html += `</tbody></table>`;
-    wrap.innerHTML = html;
-  } catch (err) {
-    wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
-  }
 }
 
 /* ===================== 전역 상태 ===================== */
