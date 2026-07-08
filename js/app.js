@@ -204,6 +204,12 @@ async function loadYearData(gid) {
   tableWrap.innerHTML = `<div class="empty-state"><div class="shape"></div>불러오는 중...</div>`;
   try {
     const resp = await loadGvizSheet(gid);
+    if (!resp || !resp.table || !Array.isArray(resp.table.rows)) {
+      console.error("gviz raw response:", resp);
+      const detail = resp && resp.errors ? resp.errors.map(e => e.detailed_message || e.message).join(" / ") : JSON.stringify(resp);
+      tableWrap.innerHTML = `<div class="empty-state">구글 시트 응답을 해석하지 못했습니다.<br><span class="mono" style="font-size:12px;">${escapeHtml(detail || "빈 응답")}</span></div>`;
+      return;
+    }
     const rows = resp.table.rows.map(r => r.c.map(c => (c ? (c.f ?? c.v ?? "") : "")));
     if (!rows.length) { tableWrap.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
     currentSheetRows = rows;
