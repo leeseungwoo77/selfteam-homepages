@@ -63,7 +63,8 @@ const SECTIONS = [
 
   { key:"performance", label:"지점 성과 지표", group:"성과", color:"blue",
     collectionName:"performance", scope:"branch", writable:"leader-and-branch",
-    desc:"지점별 매출·등록 등 성과 지표를 관리합니다.",
+    desc:"상상플렉스 고객지표 시트를 지점별로 보여줍니다.",
+    isBranchSheet:true, hasBranchSubmenu:true,
     fields:[
       { key:"period", label:"기간 (예: 2026-07)", type:"text" },
       { key:"branchId", label:"지점", type:"branchSelect" },
@@ -72,7 +73,7 @@ const SECTIONS = [
       { key:"renewalRate", label:"재등록률(%)", type:"number" },
       { key:"consultationConversion", label:"상담 전환율(%)", type:"number" },
       { key:"memo", label:"메모", type:"textarea" }
-    ], columns:["period","branchName","revenue","newRegistrations","renewalRate"], isPerformance:true },
+    ], columns:["period","branchName","revenue","newRegistrations","renewalRate"] },
 
   { key:"notice", label:"팀 공지사항", group:"소통", color:"magenta",
     collectionName:"notices", scope:"team", writable:"leader",
@@ -120,6 +121,7 @@ const COLOR_HEX = { blue:"var(--blue-bright)", green:"var(--green-bright)", mage
    열로 쭉 이어져 있고, 1행의 "MM. DD(요일)" 텍스트에서 월을 읽어 필터링합니다.
 =========================================================== */
 const SPREADSHEET_ID = "1pH_H7JJhT_1rMUyO05FSbHJeYuHUWoZ2gRBw8XWcea0";
+const PERFORMANCE_SPREADSHEET_ID = "1uequoelbdG3zLzo-FgqbDsPIlb7NGFIasS_82ZzE6iA";
 const GOOGLE_CLIENT_ID = "708745145673-j0ljnhqsl7gg0djq5p9j7uop040thqbe.apps.googleusercontent.com";
 const GOOGLE_SCOPES = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.readonly";
 const LOCATION_COLORS = {
@@ -159,10 +161,10 @@ function requestGoogleAuth() {
   });
 }
 
-async function fetchSheetValues(sheetName) {
+async function fetchSheetValues(spreadsheetId, sheetName) {
   if (!googleAccessToken) await requestGoogleAuth();
   const range = encodeURIComponent(`${sheetName}!A1:ZZ3000`);
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`;
   let res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
   if (res.status === 401) {
     googleAccessToken = null;
@@ -276,7 +278,7 @@ async function loadYearData(sheetName) {
   if (!sheetName) { tableWrap.innerHTML = `<div class="empty-state">표시할 연도를 선택해주세요.</div>`; return; }
   tableWrap.innerHTML = `<div class="empty-state"><div class="shape"></div>불러오는 중...</div>`;
   try {
-    const rows = await fetchSheetValues(sheetName);
+    const rows = await fetchSheetValues(SPREADSHEET_ID, sheetName);
     if (!rows.length) { tableWrap.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
     currentSheetRows = rows;
 
@@ -354,6 +356,61 @@ function renderSheetList(years) {
   });
 }
 
+/* ===================== 지점 성과 지표 - 구글 시트 임베드 (지점별 탭) ===================== */
+function stripBranchSuffix(name) {
+  return String(name || "").replace(/점$/, "");
+}
+
+function renderPlainSheetTable(container, rows) {
+  if (!rows.length) { container.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
+  let html = `<table style="min-width:600px;"><thead><tr>`;
+  rows[0].forEach(cell => {
+    html += `<th style="position:sticky;top:0;background:#F4FAEF;">${escapeHtml(String(cell ?? ""))}</th>`;
+  });
+  html += `</tr></thead><tbody>`;
+  for (let ri = 1; ri < rows.length; ri++) {
+    html += `<tr>`;
+    rows[ri].forEach((cell, ci) => {
+      const isRowLabel = ci === 0;
+      const style = isRowLabel ? "font-weight:700;white-space:nowrap;position:sticky;left:0;background:#fff;" : "white-space:nowrap;";
+      html += `<td style="${style}">${escapeHtml(String(cell ?? ""))}</td>`;
+    });
+    html += `</tr>`;
+  }
+  html += `</tbody></table>`;
+  container.innerHTML = html;
+}
+
+async function renderBranchSheet(section) {
+  const main = document.getElementById("mainContent");
+  const branchId = state.profile.role === "leader" ? state.branchFilter[section.key] : state.profile.branchId;
+  const branchObj = branchId ? state.branches.find(b => b.id === branchId) : null;
+  const tabName = branchObj ? `${stripBranchSuffix(branchObj.name)}_2026` : "셀프팀_2026";
+  const label = branchObj ? branchObj.name : "전체";
+
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label} · ${escapeHtml(label)}</h1>
+        <p>${section.desc}</p>
+      </div>
+      <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
+    </div>
+    <div class="card" style="overflow-x:auto;"><div id="branchSheetWrap">${googleAccessToken ? "불러오는 중..." : '오른쪽 위 "구글 계정으로 연결" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요.'}</div></div>`;
+
+  document.getElementById("googleAuthBtn").onclick = async () => {
+    try { await requestGoogleAuth(); showToast("구글 계정이 연결되었습니다."); renderSection(section.key); }
+    catch (err) { alert(err.message); }
+  };
+
+  if (!googleAccessToken) return;
+  const wrap = document.getElementById("branchSheetWrap");
+  try {
+    const rows = await fetchSheetValues(PERFORMANCE_SPREADSHEET_ID, tabName);
+    renderPlainSheetTable(wrap, rows);
+  } catch (err) {
+    wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}<br><span style="font-size:12px;">시트에 "${escapeHtml(tabName)}" 이름의 탭이 있는지 확인해주세요.</span></div>`;
+  }
+}
 
 /* ===================== 전역 상태 ===================== */
 const state = { user:null, profile:null, branches:[], currentSection:"schedule", branchFilter:{}, navExpanded:{} };
@@ -479,6 +536,7 @@ async function renderSection(key) {
   const section = SECTIONS.find(s => s.key === key);
   if (section.isScheduleSheet) { renderScheduleSheet(section); return; }
   if (section.isMeetingLog) { renderMeetingLog(section); return; }
+  if (section.isBranchSheet) { renderBranchSheet(section); return; }
   const branchId = state.branchFilter[key];
   const branchLabel = section.hasBranchSubmenu
     ? (state.profile.role === "leader"
