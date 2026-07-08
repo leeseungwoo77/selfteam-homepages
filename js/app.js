@@ -559,6 +559,7 @@ async function renderMeetingLog(section) {
         <p>${section.desc}</p>
       </div>
       <div style="display:flex;gap:8px;">
+        <a href="https://docs.google.com/presentation/d/1xrRu5zRNooseQG-fHA4D8v6SDc1eEsDmMgc7e2pDhUs/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">회의록 원본 열기</a>
         <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "구글 계정 다시 연결" : "구글 계정으로 연결"}</button>
         ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
       </div>
