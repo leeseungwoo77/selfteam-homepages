@@ -185,6 +185,17 @@ td.actions { white-space: nowrap; text-align: right; }
   width: 100%; height: auto; max-height: 80vh; object-fit: contain; cursor: zoom-out;
   background: #F4FAEF;
 }
+.meeting-img-broken {
+  width: 220px; max-width: 100%; height: 150px; border-radius: 10px; border: 1px dashed var(--border);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  font-size: 12px; color: var(--text-muted); padding: 10px; gap: 4px;
+}
+.meeting-img-broken a { color: var(--blue-deep); font-weight: 700; }
+.meeting-img-loading {
+  width: 220px; max-width: 100%; height: 150px; border-radius: 10px; border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--text-muted);
+  background: repeating-linear-gradient(45deg, #F4FAEF, #F4FAEF 10px, #EAF3E3 10px, #EAF3E3 20px);
+}
 
 @media (max-width: 860px) {
   .app { flex-direction: column; }
