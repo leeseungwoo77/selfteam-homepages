@@ -227,7 +227,7 @@ async function renderScheduleSheet(section) {
       <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">시트 아래쪽 탭에 표시된 이름을 그대로 입력하세요 (예: 2026년).</p>
       <div id="sheetList" style="margin-top:14px;"></div>
     </div>` : ""}
-    <div class="card" style="overflow-x:auto;"><div id="sheetTableWrap">${googleAccessToken ? "불러오는 중..." : "오른쪽 위 \"구글 계정으로 연결\" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요."}</div></div>`;
+    <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="sheetTableWrap">${googleAccessToken ? "불러오는 중..." : "오른쪽 위 \"구글 계정으로 연결\" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요."}</div></div>`;
 
   document.getElementById("googleAuthBtn").onclick = async () => {
     try {
@@ -363,17 +363,21 @@ function stripBranchSuffix(name) {
 
 function renderPlainSheetTable(container, rows) {
   if (!rows.length) { container.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
+  const colIndexes = [];
+  for (let ci = 1; ci < rows[0].length; ci++) colIndexes.push(ci); // 0번(첫) 열은 제외
+
   let html = `<table style="min-width:600px;"><thead><tr>`;
-  rows[0].forEach(cell => {
-    html += `<th style="position:sticky;top:0;background:#F4FAEF;">${escapeHtml(String(cell ?? ""))}</th>`;
+  colIndexes.forEach((ci, idx) => {
+    const stickyStyle = idx === 0 ? "position:sticky;left:0;background:#F4FAEF;z-index:2;" : "";
+    html += `<th style="position:sticky;top:0;background:#F4FAEF;${stickyStyle}">${escapeHtml(String(rows[0][ci] ?? ""))}</th>`;
   });
   html += `</tr></thead><tbody>`;
   for (let ri = 1; ri < rows.length; ri++) {
     html += `<tr>`;
-    rows[ri].forEach((cell, ci) => {
-      const isRowLabel = ci === 0;
-      const style = isRowLabel ? "font-weight:700;white-space:nowrap;position:sticky;left:0;background:#fff;" : "white-space:nowrap;";
-      html += `<td style="${style}">${escapeHtml(String(cell ?? ""))}</td>`;
+    colIndexes.forEach((ci, idx) => {
+      const isSticky = idx === 0;
+      const style = isSticky ? "font-weight:700;white-space:nowrap;position:sticky;left:0;background:#fff;" : "white-space:nowrap;";
+      html += `<td style="${style}">${escapeHtml(String(rows[ri][ci] ?? ""))}</td>`;
     });
     html += `</tr>`;
   }
@@ -393,9 +397,12 @@ async function renderBranchSheet(section) {
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label} · ${escapeHtml(label)}</h1>
         <p>${section.desc}</p>
       </div>
-      <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
+      <div style="display:flex;gap:8px;">
+        <a href="https://docs.google.com/spreadsheets/d/1uequoelbdG3zLzo-FgqbDsPIlb7NGFIasS_82ZzE6iA/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">고객 지표 시트 열기</a>
+        <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
+      </div>
     </div>
-    <div class="card" style="overflow-x:auto;"><div id="branchSheetWrap">${googleAccessToken ? "불러오는 중..." : '오른쪽 위 "구글 계정으로 연결" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요.'}</div></div>`;
+    <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="branchSheetWrap">${googleAccessToken ? "불러오는 중..." : '오른쪽 위 "구글 계정으로 연결" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요.'}</div></div>`;
 
   document.getElementById("googleAuthBtn").onclick = async () => {
     try { await requestGoogleAuth(); showToast("구글 계정이 연결되었습니다."); renderSection(section.key); }
