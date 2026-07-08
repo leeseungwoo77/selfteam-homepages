@@ -26,6 +26,9 @@ service cloud.firestore {
     match /notices/{id}     { allow read: if isSignedIn(); allow write: if isLeader(); }
     match /leadership/{id}  { allow read: if isSignedIn(); allow write: if isLeader(); }
 
+    // 팀장 일정 - 구글 시트 탭(월) 등록 정보. 팀장만 추가/삭제, 로그인한 누구나 조회
+    match /scheduleSheets/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
+
     // 팀 전체 협업 자료 - 로그인한 누구나 작성/수정 (팀 회의 일지, 스터디 자료)
     match /teamMeetings/{id} { allow read, write: if isSignedIn(); }
     match /study/{id}        { allow read, write: if isSignedIn(); }
