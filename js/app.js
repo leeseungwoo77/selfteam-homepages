@@ -362,25 +362,21 @@ function stripBranchSuffix(name) {
 }
 
 function renderPlainSheetTable(container, rows) {
-  if (!rows.length) { container.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
+  if (rows.length < 2) { container.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
+  const dataRows = rows.slice(1); // 1행(제목/안내용 줄)은 표시하지 않음
   const colIndexes = [];
-  for (let ci = 1; ci < rows[0].length; ci++) colIndexes.push(ci); // 0번(첫) 열은 제외
+  for (let ci = 1; ci < dataRows[0].length; ci++) colIndexes.push(ci); // 0번(첫) 열도 제외
 
-  let html = `<table style="min-width:600px;"><thead><tr>`;
-  colIndexes.forEach((ci, idx) => {
-    const stickyStyle = idx === 0 ? "position:sticky;left:0;background:#F4FAEF;z-index:2;" : "";
-    html += `<th style="position:sticky;top:0;background:#F4FAEF;${stickyStyle}">${escapeHtml(String(rows[0][ci] ?? ""))}</th>`;
-  });
-  html += `</tr></thead><tbody>`;
-  for (let ri = 1; ri < rows.length; ri++) {
+  let html = `<table style="min-width:600px;width:max-content;"><tbody>`;
+  dataRows.forEach(row => {
     html += `<tr>`;
     colIndexes.forEach((ci, idx) => {
       const isSticky = idx === 0;
       const style = isSticky ? "font-weight:700;white-space:nowrap;position:sticky;left:0;background:#fff;" : "white-space:nowrap;";
-      html += `<td style="${style}">${escapeHtml(String(rows[ri][ci] ?? ""))}</td>`;
+      html += `<td style="${style}">${escapeHtml(String(row[ci] ?? ""))}</td>`;
     });
     html += `</tr>`;
-  }
+  });
   html += `</tbody></table>`;
   container.innerHTML = html;
 }
