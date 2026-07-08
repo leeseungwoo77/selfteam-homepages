@@ -356,7 +356,7 @@ function renderSheetList(years) {
 
 
 /* ===================== 전역 상태 ===================== */
-const state = { user:null, profile:null, branches:[], currentSection:"schedule", branchFilter:{} };
+const state = { user:null, profile:null, branches:[], currentSection:"schedule", branchFilter:{}, navExpanded:{} };
 
 /* ===================== 인증 확인 ===================== */
 onAuthStateChanged(auth, async (user) => {
@@ -404,11 +404,14 @@ function buildNav() {
     const items = SECTIONS.filter(s => s.group === group && (!s.leaderOnly || state.profile.role === "leader"));
     html += `<div class="nav-group"><div class="nav-group-label">${group}</div>`;
     items.forEach(s => {
-      html += `<div class="nav-item" data-key="${s.key}" data-branch="" style="--nav-color:${COLOR_HEX[s.color]}">
-        <span class="dot" style="background:${COLOR_HEX[s.color]}"></span>${s.label}
+      const expandable = s.hasBranchSubmenu && state.profile.role === "leader";
+      const expanded = !!state.navExpanded[s.key];
+      html += `<div class="nav-item" data-key="${s.key}" data-branch="" data-expandable="${expandable}" style="--nav-color:${COLOR_HEX[s.color]}">
+        <span class="nav-label"><span class="dot" style="background:${COLOR_HEX[s.color]}"></span>${s.label}</span>
+        ${expandable ? `<span class="nav-chevron ${expanded ? "open" : ""}">›</span>` : ""}
       </div>`;
-      if (s.hasBranchSubmenu && state.profile.role === "leader") {
-        html += `<div class="nav-sub">
+      if (expandable) {
+        html += `<div class="nav-sub" style="display:${expanded ? "block" : "none"};">
           <div class="nav-subitem" data-key="${s.key}" data-branch="">전체</div>
           ${state.branches.map(b => `<div class="nav-subitem" data-key="${s.key}" data-branch="${b.id}">${escapeHtml(b.name)}</div>`).join("")}
         </div>`;
@@ -423,8 +426,21 @@ function buildNav() {
       </div></div>`;
   }
   nav.innerHTML = html;
-  nav.querySelectorAll(".nav-item, .nav-subitem").forEach(el => {
+  nav.querySelectorAll(".nav-item").forEach(el => {
     el.onclick = () => {
+      const key = el.dataset.key;
+      if (el.dataset.expandable === "true") {
+        state.navExpanded[key] = !state.navExpanded[key];
+        buildNav();
+        return;
+      }
+      state.currentSection = key;
+      renderSection(key);
+    };
+  });
+  nav.querySelectorAll(".nav-subitem").forEach(el => {
+    el.onclick = (e) => {
+      e.stopPropagation();
       const key = el.dataset.key;
       const branchId = el.dataset.branch || null;
       state.currentSection = key;
