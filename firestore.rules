@@ -34,8 +34,7 @@ service cloud.firestore {
     match /study/{id}        { allow read, write: if isSignedIn(); }
 
     // 지점별 데이터 - 팀장은 전체, 팀원은 자기 담당 지점 데이터만
-    match /directorMeetings/{id} { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
-                                    allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
+    match /directorMeetings/{id} { allow read, write: if isLeader(); }
     match /memberMeetings/{id}   { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
                                     allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
     match /performance/{id}      { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());

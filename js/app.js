@@ -38,8 +38,9 @@ const SECTIONS = [
     ], columns:["date","attendees","agenda"] },
 
   { key:"directorMeeting", label:"지점 원장 미팅 일지", group:"일정 · 미팅", color:"green",
-    collectionName:"directorMeetings", scope:"branch", writable:"leader-and-branch",
-    desc:"지점 원장님과의 미팅 내용을 기록합니다.",
+    collectionName:"directorMeetings", scope:"branch", writable:"leader",
+    desc:"지점 원장님과의 미팅 내용을 기록합니다. (팀장만 열람 가능)",
+    hasBranchSubmenu:true, leaderOnly:true,
     fields:[
       { key:"date", label:"날짜", type:"date" },
       { key:"branchId", label:"지점", type:"branchSelect" },
@@ -51,6 +52,7 @@ const SECTIONS = [
   { key:"memberMeeting", label:"지점 팀원 개별 미팅 일지", group:"일정 · 미팅", color:"green",
     collectionName:"memberMeetings", scope:"branch", writable:"leader-and-branch",
     desc:"지점 팀원과의 개별 미팅 내용을 기록합니다.",
+    hasBranchSubmenu:true,
     fields:[
       { key:"date", label:"날짜", type:"date" },
       { key:"branchId", label:"지점", type:"branchSelect" },
@@ -354,7 +356,7 @@ function renderSheetList(years) {
 
 
 /* ===================== 전역 상태 ===================== */
-const state = { user:null, profile:null, branches:[], currentSection:"schedule" };
+const state = { user:null, profile:null, branches:[], currentSection:"schedule", branchFilter:{} };
 
 /* ===================== 인증 확인 ===================== */
 onAuthStateChanged(auth, async (user) => {
@@ -399,12 +401,18 @@ function buildNav() {
   const nav = document.getElementById("navGroups");
   let html = "";
   GROUP_ORDER.forEach(group => {
-    const items = SECTIONS.filter(s => s.group === group);
+    const items = SECTIONS.filter(s => s.group === group && (!s.leaderOnly || state.profile.role === "leader"));
     html += `<div class="nav-group"><div class="nav-group-label">${group}</div>`;
     items.forEach(s => {
-      html += `<div class="nav-item" data-key="${s.key}" style="--nav-color:${COLOR_HEX[s.color]}">
+      html += `<div class="nav-item" data-key="${s.key}" data-branch="" style="--nav-color:${COLOR_HEX[s.color]}">
         <span class="dot" style="background:${COLOR_HEX[s.color]}"></span>${s.label}
       </div>`;
+      if (s.hasBranchSubmenu && state.profile.role === "leader") {
+        html += `<div class="nav-sub">
+          <div class="nav-subitem" data-key="${s.key}" data-branch="">전체</div>
+          ${state.branches.map(b => `<div class="nav-subitem" data-key="${s.key}" data-branch="${b.id}">${escapeHtml(b.name)}</div>`).join("")}
+        </div>`;
+      }
     });
     html += `</div>`;
   });
@@ -415,13 +423,21 @@ function buildNav() {
       </div></div>`;
   }
   nav.innerHTML = html;
-  nav.querySelectorAll(".nav-item").forEach(el => {
-    el.onclick = () => { state.currentSection = el.dataset.key; renderSection(el.dataset.key); };
+  nav.querySelectorAll(".nav-item, .nav-subitem").forEach(el => {
+    el.onclick = () => {
+      const key = el.dataset.key;
+      const branchId = el.dataset.branch || null;
+      state.currentSection = key;
+      state.branchFilter[key] = branchId;
+      renderSection(key);
+    };
   });
 }
 
 function markActiveNav(key) {
-  document.querySelectorAll(".nav-item").forEach(el => el.classList.toggle("active", el.dataset.key === key));
+  const branchId = state.branchFilter[key] || "";
+  document.querySelectorAll(".nav-item").forEach(el => el.classList.toggle("active", el.dataset.key === key && !el.classList.contains("nav-subitem")));
+  document.querySelectorAll(".nav-subitem").forEach(el => el.classList.toggle("active", el.dataset.key === key && (el.dataset.branch || "") === branchId));
 }
 
 /* ===================== 권한 판단 ===================== */
@@ -447,9 +463,15 @@ async function renderSection(key) {
   const section = SECTIONS.find(s => s.key === key);
   if (section.isScheduleSheet) { renderScheduleSheet(section); return; }
   if (section.isMeetingLog) { renderMeetingLog(section); return; }
+  const branchId = state.branchFilter[key];
+  const branchLabel = section.hasBranchSubmenu
+    ? (state.profile.role === "leader"
+        ? (branchId ? " · " + (state.branches.find(b => b.id === branchId)?.name || "") : " · 전체")
+        : " · " + (state.profile.branchName || ""))
+    : "";
   main.innerHTML = `<div class="page-header">
       <div>
-        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}${branchLabel}</h1>
         <p>${section.desc}</p>
       </div>
       ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
@@ -471,6 +493,8 @@ async function fetchDocs(section) {
   let q;
   if (section.scope === "branch" && state.profile.role !== "leader") {
     q = query(colRef, where("branchId", "==", state.profile.branchId));
+  } else if (section.scope === "branch" && state.branchFilter[section.key]) {
+    q = query(colRef, where("branchId", "==", state.branchFilter[section.key]));
   } else {
     q = colRef;
   }
@@ -755,6 +779,8 @@ async function renderAdmin() {
     await addDoc(collection(db, "branches"), { name, createdAt: new Date().toISOString() });
     await loadBranches();
     showToast("지점이 추가되었습니다.");
+    buildNav();
+    markActiveNav("admin");
     renderAdmin();
   });
 
@@ -772,6 +798,8 @@ async function renderAdmin() {
         await deleteDoc(doc(db, "branches", btn.dataset.bid));
         await loadBranches();
         showToast("삭제되었습니다.");
+        buildNav();
+        markActiveNav("admin");
         renderAdmin();
       };
     });
