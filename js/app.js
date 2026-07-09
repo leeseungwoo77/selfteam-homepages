@@ -28,7 +28,8 @@ const SECTIONS = [
   { key:"teamMeeting", label:"팀 회의 일지", group:"일정 · 미팅", color:"green",
     collectionName:"teamMeetings", scope:"team", writable:"all",
     desc:"팀 전체 회의 내용을 기록합니다.",
-    isMeetingLog:true,
+    cardView:true, headerFields:["date","attendees"],
+    extraLink:{ label:"회의록 원본 열기", url:"https://docs.google.com/presentation/d/1xrRu5zRNooseQG-fHA4D8v6SDc1eEsDmMgc7e2pDhUs/edit" },
     fields:[
       { key:"date", label:"날짜", type:"date" },
       { key:"attendees", label:"참석자", type:"text" },
@@ -41,19 +42,19 @@ const SECTIONS = [
   { key:"directorMeeting", label:"지점 원장 미팅 일지", group:"일정 · 미팅", color:"green",
     collectionName:"directorMeetings", scope:"branch", writable:"leader",
     desc:"지점 원장님과의 미팅 내용을 기록합니다. (팀장만 열람 가능)",
-    hasBranchSubmenu:true, leaderOnly:true,
+    hasBranchSubmenu:true, leaderOnly:true, cardView:true, headerFields:["date","branchName","director"],
     fields:[
       { key:"date", label:"날짜", type:"date" },
       { key:"branchId", label:"지점", type:"branchSelect" },
       { key:"director", label:"원장 이름", type:"text" },
-      { key:"content", label:"미팅 내용", type:"textarea" },
+      { key:"content", label:"미팅 내용", type:"richtext" },
       { key:"followUp", label:"후속조치", type:"textarea" }
     ], columns:["date","branchName","director"] },
 
   { key:"memberMeeting", label:"지점 팀원 개별 미팅 일지", group:"일정 · 미팅", color:"green",
     collectionName:"memberMeetings", scope:"branch", writable:"leader-and-branch",
     desc:"지점 팀원과의 개별 미팅 내용을 기록합니다.",
-    hasBranchSubmenu:true,
+    hasBranchSubmenu:true, cardView:true, headerFields:["date","branchName","memberName"],
     fields:[
       { key:"date", label:"날짜", type:"date" },
       { key:"branchId", label:"지점", type:"branchSelect" },
@@ -521,7 +522,7 @@ async function renderSection(key) {
 
   const section = SECTIONS.find(s => s.key === key);
   if (section.isScheduleSheet) { renderScheduleSheet(section); return; }
-  if (section.isMeetingLog) { renderMeetingLog(section); return; }
+  if (section.cardView) { renderLogCards(section); return; }
   if (section.isBranchSheet) { renderBranchSheet(section); return; }
   const branchId = state.branchFilter[key];
   const branchLabel = section.hasBranchSubmenu
@@ -630,47 +631,66 @@ function renderTable(section, docs) {
 }
 
 /* ===================== 팀 회의 일지 - 카드형 인라인 렌더러 (팝업 없이 바로 표시) ===================== */
-async function renderMeetingLog(section) {
+async function renderLogCards(section) {
   const main = document.getElementById("mainContent");
+  const branchId = state.branchFilter[section.key];
+  const branchLabel = section.hasBranchSubmenu
+    ? (state.profile.role === "leader"
+        ? (branchId ? " · " + (state.branches.find(b => b.id === branchId)?.name || "") : " · 전체")
+        : " · " + (state.profile.branchName || ""))
+    : "";
+
   main.innerHTML = `<div class="page-header">
       <div>
-        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}${branchLabel}</h1>
         <p>${section.desc}</p>
       </div>
       <div style="display:flex;gap:8px;">
-        <a href="https://docs.google.com/presentation/d/1xrRu5zRNooseQG-fHA4D8v6SDc1eEsDmMgc7e2pDhUs/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">회의록 원본 열기</a>
+        ${section.extraLink ? `<a href="${section.extraLink.url}" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">${escapeHtml(section.extraLink.label)}</a>` : ""}
         ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
       </div>
     </div>
-    <div id="meetingList">불러오는 중...</div>`;
+    <div id="logList">불러오는 중...</div>`;
 
   if (canWriteSection(section)) {
     document.getElementById("addBtn").onclick = () => openModal(section, null);
   }
 
   const docs = await fetchDocs(section);
-  const wrap = document.getElementById("meetingList");
+  const wrap = document.getElementById("logList");
   if (!docs.length) {
-    wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>아직 등록된 회의 일지가 없습니다.</div></div>`;
+    wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>아직 등록된 자료가 없습니다.</div></div>`;
     return;
   }
 
+  const imageField = section.fields.find(f => f.type === "imageUpload");
+  const bodyFields = section.fields.filter(f =>
+    !section.headerFields.includes(f.key) && f.type !== "imageUpload" && f.key !== "branchId"
+  );
+
   wrap.innerHTML = docs.map(d => {
     const editable = canEditDoc(section, d);
-    const images = (d.images || []).filter(Boolean);
+    const headerText = section.headerFields.map(k => d[k]).filter(Boolean).map(escapeHtml).join(" · ");
+    const images = imageField ? (d[imageField.key] || []).filter(Boolean) : [];
+
+    const bodyHtml = bodyFields.map(f => {
+      const val = d[f.key];
+      if (!val) return "";
+      const rendered = f.type === "richtext"
+        ? sanitizeRichHtml(String(val))
+        : escapeHtml(String(val)).replace(/\n/g, "<br>");
+      return `<div style="margin:12px 0 4px;"><strong>${escapeHtml(f.label)}</strong><div class="rich-content">${rendered}</div></div>`;
+    }).join("");
+
     return `<div class="card meeting-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-        <div>
-          <div style="font-weight:800;font-size:15px;">${escapeHtml(d.date || "")} <span style="font-weight:400;color:var(--text-muted);font-size:13px;">· 참석자: ${escapeHtml(d.attendees || "-")}</span></div>
-        </div>
+        <div style="font-weight:800;font-size:15px;">${headerText}</div>
         ${editable ? `<div>
           <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
           <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
         </div>` : ""}
       </div>
-      ${d.agenda ? `<p style="margin:12px 0 4px;"><strong>안건</strong><br>${escapeHtml(d.agenda).replace(/\n/g, "<br>")}</p>` : ""}
-      ${d.decisions ? `<p style="margin:12px 0 4px;"><strong>결정사항</strong><br>${escapeHtml(d.decisions).replace(/\n/g, "<br>")}</p>` : ""}
-      ${d.followUp ? `<p style="margin:12px 0 4px;"><strong>후속조치</strong><br>${escapeHtml(d.followUp).replace(/\n/g, "<br>")}</p>` : ""}
+      ${bodyHtml}
       ${images.length ? `<div class="meeting-gallery">
         ${images.map(url => `<span class="img-zoom-wrap"><img src="${url}" class="meeting-img" data-zoom="0" loading="lazy" onclick="cycleMeetingImgZoom(this)"></span>`).join("")}
       </div>` : ""}
@@ -691,6 +711,39 @@ async function renderMeetingLog(section) {
 }
 
 /* ===================== 등록/수정 모달 ===================== */
+const RICHTEXT_ALLOWED_TAGS = new Set([
+  "P","BR","STRONG","B","EM","I","U","UL","OL","LI","TABLE","THEAD","TBODY","TR","TD","TH",
+  "SPAN","DIV","A","H1","H2","H3","H4","BLOCKQUOTE","CODE","PRE","HR"
+]);
+const RICHTEXT_ALLOWED_ATTRS = new Set(["style","href","target","colspan","rowspan"]);
+
+function sanitizeRichHtml(html) {
+  const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+  function clean(node) {
+    [...node.childNodes].forEach(child => {
+      if (child.nodeType === 1) {
+        if (!RICHTEXT_ALLOWED_TAGS.has(child.tagName)) {
+          while (child.firstChild) node.insertBefore(child.firstChild, child);
+          node.removeChild(child);
+          return;
+        }
+        [...child.attributes].forEach(attr => {
+          const name = attr.name.toLowerCase();
+          if (!RICHTEXT_ALLOWED_ATTRS.has(name)) { child.removeAttribute(attr.name); return; }
+          if (name === "href" && !/^https?:/i.test(attr.value)) child.removeAttribute(attr.name);
+          if (name === "style" && /expression|javascript:/i.test(attr.value)) child.removeAttribute(attr.name);
+        });
+        if (child.tagName === "A") child.setAttribute("target", "_blank");
+        clean(child);
+      } else if (child.nodeType !== 3) {
+        node.removeChild(child);
+      }
+    });
+  }
+  clean(doc.body);
+  return doc.body.innerHTML;
+}
+
 function fieldInput(field, value) {
   const v = value ?? "";
   if (field.type === "textarea") {
@@ -726,6 +779,14 @@ function openModal(section, existing) {
         <div class="image-thumbs" id="imgthumbs_${f.key}"></div>
         <input type="file" id="imginput_${f.key}" accept="image/*" multiple>
         <p style="font-size:12px;color:var(--text-muted);margin-top:4px;">구글 슬라이드를 이미지로 내보낸 뒤 여러 장을 한 번에 올릴 수 있어요.</p>
+      </div>`;
+    }
+    if (f.type === "richtext") {
+      const initial = sanitizeRichHtml(existing ? existing[f.key] : "");
+      return `<div class="field">
+        <label>${f.label}</label>
+        <div class="richtext-edit" id="f_${f.key}" contenteditable="true">${initial}</div>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">Tiro 등에서 복사한 내용을 표까지 그대로 붙여넣기(Ctrl+V) 하실 수 있어요.</p>
       </div>`;
     }
     return `<div class="field"><label>${f.label}</label>${fieldInput(f, existing ? existing[f.key] : "")}</div>`;
@@ -784,7 +845,11 @@ function openModal(section, existing) {
       for (const f of section.fields) {
         if (f.type === "imageUpload") continue;
         const el = document.getElementById(`f_${f.key}`);
-        data[f.key] = el ? el.value : "";
+        if (f.type === "richtext") {
+          data[f.key] = el ? sanitizeRichHtml(el.innerHTML) : "";
+        } else {
+          data[f.key] = el ? el.value : "";
+        }
       }
       for (const f of section.fields) {
         if (f.type !== "imageUpload") continue;
