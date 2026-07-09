@@ -199,8 +199,17 @@ td.actions { white-space: nowrap; text-align: right; }
 .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text-main); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 13px; z-index: 80; }
 
 /* ---------- 팀 회의 일지 카드 ---------- */
-.meeting-card { }
+.meeting-card { padding: 0; overflow: hidden; }
 .meeting-card p { font-size: 13.5px; line-height: 1.6; }
+.log-summary {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 18px 22px; cursor: pointer;
+}
+.log-summary:hover { background: #FAFEF6; }
+.log-chevron { display: inline-block; margin-left: 8px; opacity: .5; transition: transform .15s ease; }
+.log-summary.open .log-chevron { transform: rotate(90deg); }
+.log-body { display: none; padding: 0 22px 22px; }
+.log-body.open { display: block; }
 .meeting-gallery { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .img-zoom-wrap { max-width: 100%; border-radius: 10px; }
 .img-zoom-wrap.full { width: 100%; }

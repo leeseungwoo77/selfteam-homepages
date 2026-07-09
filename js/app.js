@@ -683,25 +683,36 @@ async function renderLogCards(section) {
     }).join("");
 
     return `<div class="card meeting-card">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-        <div style="font-weight:800;font-size:15px;">${headerText}</div>
+      <div class="log-summary" data-toggle="${d.id}">
+        <div style="font-weight:800;font-size:15px;">${headerText}<span class="log-chevron">›</span></div>
         ${editable ? `<div>
           <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
           <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
         </div>` : ""}
       </div>
-      ${bodyHtml}
-      ${images.length ? `<div class="meeting-gallery">
-        ${images.map(url => `<span class="img-zoom-wrap"><img src="${url}" class="meeting-img" data-zoom="0" loading="lazy" onclick="cycleMeetingImgZoom(this)"></span>`).join("")}
-      </div>` : ""}
+      <div class="log-body" id="body_${d.id}">
+        ${bodyHtml}
+        ${images.length ? `<div class="meeting-gallery">
+          ${images.map(url => `<span class="img-zoom-wrap"><img src="${url}" class="meeting-img" data-zoom="0" loading="lazy" onclick="cycleMeetingImgZoom(this)"></span>`).join("")}
+        </div>` : ""}
+      </div>
     </div>`;
   }).join("");
 
+  wrap.querySelectorAll(".log-summary").forEach(el => {
+    el.onclick = () => {
+      const body = document.getElementById(`body_${el.dataset.toggle}`);
+      const opening = !body.classList.contains("open");
+      body.classList.toggle("open", opening);
+      el.classList.toggle("open", opening);
+    };
+  });
   wrap.querySelectorAll('[data-act="edit"]').forEach(btn => {
-    btn.onclick = () => openModal(section, docs.find(d => d.id === btn.dataset.id));
+    btn.onclick = (e) => { e.stopPropagation(); openModal(section, docs.find(d => d.id === btn.dataset.id)); };
   });
   wrap.querySelectorAll('[data-act="del"]').forEach(btn => {
-    btn.onclick = async () => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
       if (!confirm("정말 삭제하시겠습니까?")) return;
       await deleteDoc(doc(db, section.collectionName, btn.dataset.id));
       showToast("삭제되었습니다.");
