@@ -1,7 +1,8 @@
 import {
   auth, db, onAuthStateChanged, signOut,
   collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
-  getDoc, getDocs, query, where, orderBy, serverTimestamp
+  getDoc, getDocs, query, where, orderBy, serverTimestamp,
+  storage, ref, uploadBytes, getDownloadURL, deleteObject
 } from "./firebase-init.js";
 
 /* ===================== 섹션(메뉴) 정의 =====================
@@ -34,7 +35,7 @@ const SECTIONS = [
       { key:"agenda", label:"안건", type:"textarea" },
       { key:"decisions", label:"결정사항", type:"textarea" },
       { key:"followUp", label:"후속조치", type:"textarea" },
-      { key:"images", label:"회의 슬라이드 이미지 (구글 드라이브 링크, 줄바꿈으로 여러 개)", type:"driveImages" }
+      { key:"images", label:"회의 슬라이드 이미지", type:"imageUpload" }
     ], columns:["date","attendees","agenda"] },
 
   { key:"directorMeeting", label:"지점 원장 미팅 일지", group:"일정 · 미팅", color:"green",
@@ -177,24 +178,6 @@ async function fetchSheetValues(spreadsheetId, sheetName) {
   }
   const data = await res.json();
   return data.values || [];
-}
-
-const driveImageCache = {}; // fileId -> blob URL (같은 세션 안에서 재사용)
-async function fetchDriveImageBlobUrl(fileId) {
-  if (driveImageCache[fileId]) return driveImageCache[fileId];
-  if (!googleAccessToken) await requestGoogleAuth();
-  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-  let res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
-  if (res.status === 401) {
-    googleAccessToken = null;
-    await requestGoogleAuth();
-    res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
-  }
-  if (!res.ok) throw new Error(`이미지를 불러오지 못했습니다 (${res.status})`);
-  const blob = await res.blob();
-  const objUrl = URL.createObjectURL(blob);
-  driveImageCache[fileId] = objUrl;
-  return objUrl;
 }
 
 function parseMonthFromHeader(str) {
@@ -647,12 +630,6 @@ function renderTable(section, docs) {
 }
 
 /* ===================== 팀 회의 일지 - 카드형 인라인 렌더러 (팝업 없이 바로 표시) ===================== */
-function extractDriveId(link) {
-  const str = String(link || "").trim();
-  const m = str.match(/\/d\/([a-zA-Z0-9_-]+)/) || str.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  return m ? m[1] : null;
-}
-
 async function renderMeetingLog(section) {
   const main = document.getElementById("mainContent");
   main.innerHTML = `<div class="page-header">
@@ -662,16 +639,11 @@ async function renderMeetingLog(section) {
       </div>
       <div style="display:flex;gap:8px;">
         <a href="https://docs.google.com/presentation/d/1xrRu5zRNooseQG-fHA4D8v6SDc1eEsDmMgc7e2pDhUs/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">회의록 원본 열기</a>
-        <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "구글 계정 다시 연결" : "구글 계정으로 연결"}</button>
         ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
       </div>
     </div>
     <div id="meetingList">불러오는 중...</div>`;
 
-  document.getElementById("googleAuthBtn").onclick = async () => {
-    try { await requestGoogleAuth(); showToast("구글 계정이 연결되었습니다."); renderSection(section.key); }
-    catch (err) { alert(err.message); }
-  };
   if (canWriteSection(section)) {
     document.getElementById("addBtn").onclick = () => openModal(section, null);
   }
@@ -699,8 +671,8 @@ async function renderMeetingLog(section) {
       ${d.agenda ? `<p style="margin:12px 0 4px;"><strong>안건</strong><br>${escapeHtml(d.agenda).replace(/\n/g, "<br>")}</p>` : ""}
       ${d.decisions ? `<p style="margin:12px 0 4px;"><strong>결정사항</strong><br>${escapeHtml(d.decisions).replace(/\n/g, "<br>")}</p>` : ""}
       ${d.followUp ? `<p style="margin:12px 0 4px;"><strong>후속조치</strong><br>${escapeHtml(d.followUp).replace(/\n/g, "<br>")}</p>` : ""}
-      ${images.length ? `<div class="meeting-gallery" data-images="${escapeHtml(JSON.stringify(images))}" id="gallery_${d.id}">
-        ${images.map(() => `<div class="meeting-img meeting-img-loading">불러오는 중...</div>`).join("")}
+      ${images.length ? `<div class="meeting-gallery">
+        ${images.map(url => `<img src="${url}" class="meeting-img" loading="lazy" onclick="this.classList.toggle('zoomed')">`).join("")}
       </div>` : ""}
     </div>`;
   }).join("");
@@ -716,29 +688,6 @@ async function renderMeetingLog(section) {
       renderSection(section.key);
     };
   });
-
-  // 각 카드의 이미지를 OAuth로 하나씩 불러와서 채워넣기
-  wrap.querySelectorAll(".meeting-gallery").forEach(async (galleryEl) => {
-    const images = JSON.parse(galleryEl.dataset.images);
-    const placeholders = galleryEl.querySelectorAll(".meeting-img-loading");
-    for (let i = 0; i < images.length; i++) {
-      const link = images[i];
-      const slot = placeholders[i];
-      const id = extractDriveId(link);
-      if (!id) { slot.outerHTML = `<div class="meeting-img-broken">유효한 드라이브 링크가 아니에요.</div>`; continue; }
-      try {
-        const blobUrl = await fetchDriveImageBlobUrl(id);
-        const img = document.createElement("img");
-        img.src = blobUrl;
-        img.className = "meeting-img";
-        img.loading = "lazy";
-        img.onclick = () => img.classList.toggle("zoomed");
-        slot.replaceWith(img);
-      } catch (err) {
-        slot.outerHTML = `<div class="meeting-img-broken">이미지를 불러올 수 없어요.<br><a href="${link}" target="_blank" rel="noopener">드라이브에서 열기</a></div>`;
-      }
-    }
-  });
 }
 
 /* ===================== 등록/수정 모달 ===================== */
@@ -746,10 +695,6 @@ function fieldInput(field, value) {
   const v = value ?? "";
   if (field.type === "textarea") {
     return `<textarea id="f_${field.key}" rows="3">${escapeHtml(String(v))}</textarea>`;
-  }
-  if (field.type === "driveImages") {
-    const text = Array.isArray(v) ? v.join("\n") : String(v || "");
-    return `<textarea id="f_${field.key}" rows="3" placeholder="https://drive.google.com/file/d/.../view\nhttps://drive.google.com/file/d/.../view">${escapeHtml(text)}</textarea>`;
   }
   if (field.type === "branchSelect") {
     if (state.profile.role !== "leader") {
@@ -771,9 +716,20 @@ function fieldInput(field, value) {
 
 function openModal(section, existing) {
   const root = document.getElementById("modalRoot");
-  const fieldsHtml = section.fields.map(f => `
-    <div class="field"><label>${f.label}</label>${fieldInput(f, existing ? existing[f.key] : "")}</div>
-  `).join("");
+  const imageState = {}; // key -> { urls: [...기존 URL], files: [새로 추가한 File] }
+
+  const fieldsHtml = section.fields.map(f => {
+    if (f.type === "imageUpload") {
+      imageState[f.key] = { urls: [...((existing && existing[f.key]) || [])], files: [] };
+      return `<div class="field">
+        <label>${f.label}</label>
+        <div class="image-thumbs" id="imgthumbs_${f.key}"></div>
+        <input type="file" id="imginput_${f.key}" accept="image/*" multiple>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:4px;">구글 슬라이드를 이미지로 내보낸 뒤 여러 장을 한 번에 올릴 수 있어요.</p>
+      </div>`;
+    }
+    return `<div class="field"><label>${f.label}</label>${fieldInput(f, existing ? existing[f.key] : "")}</div>`;
+  }).join("");
 
   root.innerHTML = `<div class="modal-bg" id="modalBg">
     <div class="modal">
@@ -789,6 +745,35 @@ function openModal(section, existing) {
   document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
   document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
 
+  function renderThumbs(key) {
+    const wrap = document.getElementById(`imgthumbs_${key}`);
+    if (!wrap) return;
+    const st = imageState[key];
+    const items = [
+      ...st.urls.map((url, i) => ({ type: "url", src: url, i })),
+      ...st.files.map((file, i) => ({ type: "file", src: URL.createObjectURL(file), i }))
+    ];
+    wrap.innerHTML = items.length
+      ? items.map(it => `<div class="thumb-item"><img src="${it.src}"><button type="button" class="thumb-remove" data-type="${it.type}" data-i="${it.i}">×</button></div>`).join("")
+      : `<p style="font-size:12px;color:var(--text-muted);">등록된 이미지가 없습니다.</p>`;
+    wrap.querySelectorAll(".thumb-remove").forEach(btn => {
+      btn.onclick = () => {
+        const i = parseInt(btn.dataset.i, 10);
+        if (btn.dataset.type === "url") st.urls.splice(i, 1); else st.files.splice(i, 1);
+        renderThumbs(key);
+      };
+    });
+  }
+
+  section.fields.filter(f => f.type === "imageUpload").forEach(f => {
+    renderThumbs(f.key);
+    document.getElementById(`imginput_${f.key}`).addEventListener("change", (e) => {
+      imageState[f.key].files.push(...Array.from(e.target.files));
+      renderThumbs(f.key);
+      e.target.value = "";
+    });
+  });
+
   document.getElementById("entryForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const saveBtn = document.getElementById("saveBtn");
@@ -796,14 +781,23 @@ function openModal(section, existing) {
     saveBtn.textContent = "저장 중...";
     try {
       const data = {};
-      section.fields.forEach(f => {
+      for (const f of section.fields) {
+        if (f.type === "imageUpload") continue;
         const el = document.getElementById(`f_${f.key}`);
-        if (f.type === "driveImages") {
-          data[f.key] = el ? el.value.split("\n").map(s => s.trim()).filter(Boolean) : [];
-        } else {
-          data[f.key] = el ? el.value : "";
+        data[f.key] = el ? el.value : "";
+      }
+      for (const f of section.fields) {
+        if (f.type !== "imageUpload") continue;
+        const st = imageState[f.key];
+        const uploadedUrls = [];
+        for (const file of st.files) {
+          const path = `${section.collectionName}/${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name}`;
+          const fileRef = ref(storage, path);
+          await uploadBytes(fileRef, file);
+          uploadedUrls.push(await getDownloadURL(fileRef));
         }
-      });
+        data[f.key] = [...st.urls, ...uploadedUrls];
+      }
       if (section.scope === "branch") {
         if (state.profile.role !== "leader") {
           data.branchId = state.profile.branchId;
