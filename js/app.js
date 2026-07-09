@@ -905,6 +905,7 @@ window.cycleMeetingImgZoom = function (img) {
   img.classList.remove("zoomed", "zoomed-more");
   if (level === 1) img.classList.add("zoomed");
   else if (level === 2) img.classList.add("zoomed-more");
+  img.parentElement.classList.toggle("full", level > 0);
 };
 
 function escapeHtml(str) {

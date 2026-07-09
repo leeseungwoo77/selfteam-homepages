@@ -189,7 +189,8 @@ td.actions { white-space: nowrap; text-align: right; }
 .meeting-card { }
 .meeting-card p { font-size: 13.5px; line-height: 1.6; }
 .meeting-gallery { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-.img-zoom-wrap { max-width: 100%; overflow: auto; border-radius: 10px; }
+.img-zoom-wrap { max-width: 100%; border-radius: 10px; }
+.img-zoom-wrap.full { width: 100%; }
 .meeting-img {
   width: 220px; max-width: 100%; border-radius: 10px; border: 1px solid var(--border);
   cursor: zoom-in; transition: all .2s ease; object-fit: cover; height: 150px; display: block;
@@ -199,10 +200,9 @@ td.actions { white-space: nowrap; text-align: right; }
   background: #F4FAEF;
 }
 .meeting-img.zoomed-more {
-  width: 170%; max-width: none; height: auto; max-height: none; object-fit: contain; cursor: zoom-out;
+  width: 100%; max-width: 100%; height: auto; max-height: none; object-fit: contain; cursor: zoom-out;
   background: #F4FAEF;
 }
-.img-zoom-wrap:has(.zoomed-more) { max-height: 80vh; }
 
 /* ---------- 이미지 업로드 썸네일 (등록/수정 폼) ---------- */
 .image-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
