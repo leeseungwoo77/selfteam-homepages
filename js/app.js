@@ -672,7 +672,7 @@ async function renderMeetingLog(section) {
       ${d.decisions ? `<p style="margin:12px 0 4px;"><strong>결정사항</strong><br>${escapeHtml(d.decisions).replace(/\n/g, "<br>")}</p>` : ""}
       ${d.followUp ? `<p style="margin:12px 0 4px;"><strong>후속조치</strong><br>${escapeHtml(d.followUp).replace(/\n/g, "<br>")}</p>` : ""}
       ${images.length ? `<div class="meeting-gallery">
-        ${images.map(url => `<img src="${url}" class="meeting-img" loading="lazy" onclick="this.classList.toggle('zoomed')">`).join("")}
+        ${images.map(url => `<span class="img-zoom-wrap"><img src="${url}" class="meeting-img" data-zoom="0" loading="lazy" onclick="cycleMeetingImgZoom(this)"></span>`).join("")}
       </div>` : ""}
     </div>`;
   }).join("");
@@ -899,6 +899,14 @@ async function renderAdmin() {
 }
 
 /* ===================== 유틸 ===================== */
+window.cycleMeetingImgZoom = function (img) {
+  const level = (parseInt(img.dataset.zoom || "0", 10) + 1) % 3;
+  img.dataset.zoom = level;
+  img.classList.remove("zoomed", "zoomed-more");
+  if (level === 1) img.classList.add("zoomed");
+  else if (level === 2) img.classList.add("zoomed-more");
+};
+
 function escapeHtml(str) {
   return str.replace(/[&<>"']/g, m => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[m]));
 }
