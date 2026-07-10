@@ -435,6 +435,9 @@ onAuthStateChanged(auth, async (user) => {
 });
 
 document.getElementById("logoutBtn").onclick = () => signOut(auth);
+document.getElementById("navToggleBtn").onclick = () => {
+  document.querySelector(".sidebar").classList.toggle("nav-open");
+};
 
 async function loadBranches() {
   const snap = await getDocs(collection(db, "branches"));
@@ -518,6 +521,7 @@ function buildNav() {
       }
       state.currentSection = key;
       renderSection(key);
+      closeMobileNav();
     };
   });
   nav.querySelectorAll(".nav-subitem").forEach(el => {
@@ -528,8 +532,13 @@ function buildNav() {
       state.currentSection = key;
       state.branchFilter[key] = branchId;
       renderSection(key);
+      closeMobileNav();
     };
   });
+}
+
+function closeMobileNav() {
+  if (window.innerWidth <= 860) document.querySelector(".sidebar").classList.remove("nav-open");
 }
 
 function markActiveNav(key) {

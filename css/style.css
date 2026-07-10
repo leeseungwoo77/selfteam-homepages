@@ -235,10 +235,21 @@ td.actions { white-space: nowrap; text-align: right; }
   background: var(--danger); color: #fff; border: 2px solid #fff; font-size: 12px; line-height: 1; cursor: pointer;
 }
 
+.nav-toggle-btn { display: none; }
+
 @media (max-width: 860px) {
   .app { flex-direction: column; }
-  .sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; }
-  .nav-group { display: none; }
+  .sidebar { width: 100%; padding: 16px; }
+  .sidebar-logo { position: relative; padding-bottom: 12px; }
+  .nav-toggle-btn {
+    display: block; margin-left: auto; background: rgba(255,255,255,0.1); color: #fff;
+    border: none; border-radius: 8px; width: 34px; height: 34px; font-size: 16px; cursor: pointer;
+  }
+  .who { margin-bottom: 10px; }
+  #navGroups { display: none; max-height: 60vh; overflow-y: auto; }
+  .sidebar.nav-open #navGroups { display: block; }
+  .sidebar-footer { display: none; }
+  .sidebar.nav-open .sidebar-footer { display: block; margin-top: 10px; }
   .main { padding: 20px; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
 }
