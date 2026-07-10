@@ -400,7 +400,7 @@ async function renderBranchSheet(section) {
 }
 
 /* ===================== 전역 상태 ===================== */
-const state = { user:null, profile:null, branches:[], currentSection:"schedule", branchFilter:{}, navExpanded:{} };
+const state = { user:null, profile:null, branches:[], customFolders:[], currentSection:"schedule", branchFilter:{}, navExpanded:{} };
 
 /* ===================== 인증 확인 ===================== */
 onAuthStateChanged(auth, async (user) => {
@@ -429,6 +429,7 @@ onAuthStateChanged(auth, async (user) => {
     <div class="role">${state.profile.role === "leader" ? "팀장" : "팀원 · " + escapeHtml(state.profile.branchName || "")}</div>`;
 
   await loadBranches();
+  await loadCustomFolders();
   buildNav();
   renderSection(state.currentSection);
 });
@@ -440,12 +441,49 @@ async function loadBranches() {
   state.branches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
+async function loadCustomFolders() {
+  const snap = await getDocs(collection(db, "customFolders"));
+  state.customFolders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+/* 팀장이 만든 "사용자 정의 폴더"를 기존 SECTIONS 항목과 동일한 방식으로 다루기 위한 변환 */
+function folderToSection(folder) {
+  return {
+    key: "folder_" + folder.id,
+    label: folder.label,
+    group: folder.group,
+    color: folder.color || "neutral",
+    collectionName: "folderEntries",
+    scope: "custom",
+    folderId: folder.id,
+    writable: folder.writable || "leader",
+    cardView: true,
+    headerFields: ["title"],
+    desc: folder.desc || "",
+    fields: [
+      { key: "title", label: "제목", type: "text" },
+      { key: "content", label: "내용", type: "richtext" },
+      { key: "images", label: "첨부 이미지", type: "imageUpload" }
+    ]
+  };
+}
+
+function getSectionByKey(key) {
+  if (key.startsWith("folder_")) {
+    const folder = state.customFolders.find(f => "folder_" + f.id === key);
+    return folder ? folderToSection(folder) : null;
+  }
+  return SECTIONS.find(s => s.key === key);
+}
+
 /* ===================== 사이드바 네비게이션 ===================== */
 function buildNav() {
   const nav = document.getElementById("navGroups");
   let html = "";
   GROUP_ORDER.forEach(group => {
-    const items = SECTIONS.filter(s => s.group === group && (!s.leaderOnly || state.profile.role === "leader"));
+    const builtIn = SECTIONS.filter(s => s.group === group && (!s.leaderOnly || state.profile.role === "leader"));
+    const folders = state.customFolders.filter(f => f.group === group).map(folderToSection);
+    const items = [...builtIn, ...folders];
     html += `<div class="nav-group"><div class="nav-group-label">${group}</div>`;
     items.forEach(s => {
       const expandable = s.hasBranchSubmenu && state.profile.role === "leader";
@@ -520,7 +558,8 @@ async function renderSection(key) {
   const main = document.getElementById("mainContent");
   if (key === "admin") { renderAdmin(); return; }
 
-  const section = SECTIONS.find(s => s.key === key);
+  const section = getSectionByKey(key);
+  if (!section) { main.innerHTML = `<div class="empty-state">찾을 수 없는 메뉴입니다.</div>`; return; }
   if (section.isScheduleSheet) { renderScheduleSheet(section); return; }
   if (section.cardView) { renderLogCards(section); return; }
   if (section.isBranchSheet) { renderBranchSheet(section); return; }
@@ -552,7 +591,9 @@ async function renderSection(key) {
 async function fetchDocs(section) {
   const colRef = collection(db, section.collectionName);
   let q;
-  if (section.scope === "branch" && state.profile.role !== "leader") {
+  if (section.scope === "custom") {
+    q = query(colRef, where("folderId", "==", section.folderId));
+  } else if (section.scope === "branch" && state.profile.role !== "leader") {
     q = query(colRef, where("branchId", "==", state.profile.branchId));
   } else if (section.scope === "branch" && state.branchFilter[section.key]) {
     q = query(colRef, where("branchId", "==", state.branchFilter[section.key]));
@@ -883,6 +924,9 @@ function openModal(section, existing) {
           data.branchName = b ? b.name : "";
         }
       }
+      if (section.scope === "custom") {
+        data.folderId = section.folderId;
+      }
       data.updatedAt = new Date().toISOString();
       data.updatedBy = state.profile.name;
 
@@ -917,6 +961,32 @@ async function renderAdmin() {
       </form>
     </div>
     <div class="card"><h2>지점 목록</h2><div id="branchTable">불러오는 중...</div></div>
+    <div class="card">
+      <h2>새 폴더(메뉴) 만들기</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 14px;">제목·내용(표 포함 가능)·이미지를 자유롭게 올릴 수 있는 폴더를 직접 추가할 수 있어요. 코드 수정 없이 바로 메뉴에 반영됩니다.</p>
+      <form id="folderForm" class="grid-2" style="align-items:end;">
+        <div class="field" style="margin:0;"><label>폴더 이름</label><input type="text" id="newFolderLabel" placeholder="예: 채용 자료" required></div>
+        <div class="field" style="margin:0;"><label>어느 그룹에 넣을까요?</label>
+          <select id="newFolderGroup">${GROUP_ORDER.map(g => `<option value="${g}">${g}</option>`).join("")}</select>
+        </div>
+        <div class="field" style="margin:0;"><label>메뉴 색상</label>
+          <select id="newFolderColor">
+            <option value="blue">파랑</option>
+            <option value="green">초록</option>
+            <option value="magenta">마젠타</option>
+            <option value="neutral" selected>회색(기본)</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0;"><label>작성 권한</label>
+          <select id="newFolderWritable">
+            <option value="leader">팀장만 작성</option>
+            <option value="all">전원 작성 가능</option>
+          </select>
+        </div>
+        <button class="btn" type="submit" style="grid-column: span 2;">폴더 만들기</button>
+      </form>
+      <div id="folderList" style="margin-top:16px;"></div>
+    </div>
     <div class="card"><h2>팀원 목록</h2><div id="userTable">불러오는 중...</div></div>`;
 
   document.getElementById("branchForm").addEventListener("submit", async (e) => {
@@ -944,6 +1014,46 @@ async function renderAdmin() {
         if (!confirm("지점을 삭제하면 소속 데이터는 남아있지만 지점명 표시가 어긋날 수 있습니다. 삭제할까요?")) return;
         await deleteDoc(doc(db, "branches", btn.dataset.bid));
         await loadBranches();
+        showToast("삭제되었습니다.");
+        buildNav();
+        markActiveNav("admin");
+        renderAdmin();
+      };
+    });
+  }
+
+  document.getElementById("folderForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const label = document.getElementById("newFolderLabel").value.trim();
+    if (!label) return;
+    const group = document.getElementById("newFolderGroup").value;
+    const color = document.getElementById("newFolderColor").value;
+    const writable = document.getElementById("newFolderWritable").value;
+    await addDoc(collection(db, "customFolders"), { label, group, color, writable, createdAt: new Date().toISOString() });
+    await loadCustomFolders();
+    showToast("폴더가 생성되었습니다.");
+    buildNav();
+    markActiveNav("admin");
+    renderAdmin();
+  });
+
+  const folderWrap = document.getElementById("folderList");
+  if (!state.customFolders.length) {
+    folderWrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 만든 폴더가 없습니다.</p>`;
+  } else {
+    folderWrap.innerHTML = `<table><thead><tr><th>이름</th><th>그룹</th><th>작성 권한</th><th></th></tr></thead><tbody>
+      ${state.customFolders.map(f => `<tr>
+        <td>${escapeHtml(f.label)}</td>
+        <td>${escapeHtml(f.group)}</td>
+        <td>${f.writable === "all" ? "전원" : "팀장만"}</td>
+        <td class="actions"><button class="icon-btn danger" data-fid="${f.id}">삭제</button></td>
+      </tr>`).join("")}
+    </tbody></table>`;
+    folderWrap.querySelectorAll("[data-fid]").forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm("이 폴더를 삭제하면 안의 게시물도 더 이상 보이지 않게 됩니다. 삭제할까요?")) return;
+        await deleteDoc(doc(db, "customFolders", btn.dataset.fid));
+        await loadCustomFolders();
         showToast("삭제되었습니다.");
         buildNav();
         markActiveNav("admin");
