@@ -87,14 +87,8 @@ const SECTIONS = [
     ], columns:["title","important"] },
 
   { key:"operation", label:"지점 운영 자료", group:"자료실", color:"neutral",
-    collectionName:"operations", scope:"branch", writable:"leader-and-branch",
-    desc:"지점 운영과 관련된 자료를 관리합니다.",
-    fields:[
-      { key:"branchId", label:"지점", type:"branchSelect" },
-      { key:"title", label:"제목", type:"text" },
-      { key:"content", label:"내용", type:"textarea" },
-      { key:"fileLink", label:"첨부 링크(URL)", type:"text" }
-    ], columns:["branchName","title"] },
+    desc:"지점별 자료 링크를 한눈에 모아 봅니다. (지점 × 양식 표)",
+    isOpsGrid:true },
 
   { key:"leadership", label:"리더십 자료", group:"자료실", color:"neutral",
     collectionName:"leadership", scope:"team", writable:"leader",
@@ -399,7 +393,154 @@ async function renderBranchSheet(section) {
   }
 }
 
-/* ===================== 전역 상태 ===================== */
+/* ===================== 지점 운영 자료 - 지점 × 양식 링크 대시보드 ===================== */
+async function loadOpsCategories() {
+  const snap = await getDocs(collection(db, "opsCategories"));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order || 0) - (b.order || 0));
+}
+
+async function loadOpsLinks() {
+  const snap = await getDocs(collection(db, "opsLinks"));
+  const map = {};
+  snap.docs.forEach(d => { map[d.id] = { id: d.id, ...d.data() }; });
+  return map;
+}
+
+function canEditOpsCell(branchId) {
+  if (state.profile.role === "leader") return true;
+  return state.profile.branchId === branchId;
+}
+
+async function renderOpsGrid(section) {
+  const main = document.getElementById("mainContent");
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <p>${section.desc}</p>
+      </div>
+    </div>
+    ${state.profile.role === "leader" ? `
+    <div class="card" id="categoryAdminCard">
+      <h2>양식(행) 종류 관리</h2>
+      <form id="categoryForm" class="grid-2">
+        <input type="text" id="newCategoryLabel" placeholder="예: 등록현황, 주간회의록..." required>
+        <button class="btn" type="submit">추가</button>
+      </form>
+      <div id="categoryList" style="margin-top:14px;"></div>
+    </div>` : ""}
+    <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="opsGridWrap">불러오는 중...</div></div>`;
+
+  const [categories, branchesSorted] = await Promise.all([
+    loadOpsCategories(),
+    Promise.resolve([...state.branches].sort((a, b) => a.name.localeCompare(b.name, "ko")))
+  ]);
+  const linksMap = await loadOpsLinks();
+
+  if (state.profile.role === "leader") {
+    document.getElementById("categoryForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const label = document.getElementById("newCategoryLabel").value.trim();
+      if (!label) return;
+      const maxOrder = categories.reduce((m, c) => Math.max(m, c.order || 0), 0);
+      await addDoc(collection(db, "opsCategories"), { label, order: maxOrder + 1, createdAt: new Date().toISOString() });
+      showToast("추가되었습니다.");
+      renderOpsGrid(section);
+    });
+    renderCategoryList(categories);
+  }
+
+  renderOpsTable(categories, branchesSorted, linksMap);
+}
+
+function renderCategoryList(categories) {
+  const wrap = document.getElementById("categoryList");
+  if (!categories.length) { wrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 등록된 양식이 없습니다.</p>`; return; }
+  wrap.innerHTML = `<table><thead><tr><th>양식 이름</th><th></th></tr></thead><tbody>
+    ${categories.map(c => `<tr><td>${escapeHtml(c.label)}</td>
+      <td class="actions"><button class="icon-btn danger" data-cid="${c.id}">삭제</button></td></tr>`).join("")}
+  </tbody></table>`;
+  wrap.querySelectorAll("[data-cid]").forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm("이 양식(행)을 삭제할까요? 등록된 링크들도 함께 안 보이게 됩니다.")) return;
+      await deleteDoc(doc(db, "opsCategories", btn.dataset.cid));
+      showToast("삭제되었습니다.");
+      renderSection("operation");
+    };
+  });
+}
+
+function renderOpsTable(categories, branchesSorted, linksMap) {
+  const wrap = document.getElementById("opsGridWrap");
+  if (!branchesSorted.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다. "지점 · 팀원 관리"에서 지점을 먼저 추가해주세요.</div>`; return; }
+  if (!categories.length) { wrap.innerHTML = `<div class="empty-state">${state.profile.role === "leader" ? "위에서 양식을 먼저 추가해주세요." : "아직 등록된 양식이 없습니다."}</div>`; return; }
+
+  let html = `<table style="min-width:700px;"><thead><tr><th style="position:sticky;left:0;background:#F4FAEF;">양식</th>
+    ${branchesSorted.map(b => `<th>${escapeHtml(b.name)}</th>`).join("")}</tr></thead><tbody>`;
+  categories.forEach(cat => {
+    html += `<tr><td style="font-weight:700;position:sticky;left:0;background:#fff;white-space:nowrap;">${escapeHtml(cat.label)}</td>`;
+    branchesSorted.forEach(b => {
+      const cellId = `${b.id}_${cat.id}`;
+      const link = linksMap[cellId];
+      const editable = canEditOpsCell(b.id);
+      if (link && link.url) {
+        html += `<td style="white-space:nowrap;">
+          <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="icon-btn" style="color:var(--blue-deep);">열기 ↗</a>
+          ${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">수정</button>` : ""}
+        </td>`;
+      } else {
+        html += `<td>${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">+ 링크 추가</button>` : `<span style="color:var(--text-muted);font-size:12px;">-</span>`}</td>`;
+      }
+    });
+    html += `</tr>`;
+  });
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll("[data-edit-cell]").forEach(btn => {
+    btn.onclick = () => openOpsLinkModal(btn.dataset.editCell, btn.dataset.branch, btn.dataset.cat, linksMap[btn.dataset.editCell]?.url || "");
+  });
+}
+
+function openOpsLinkModal(cellId, branchId, categoryId, currentUrl) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>링크 설정</h3>
+      <form id="opsLinkForm">
+        <div class="field"><label>URL (구글 시트, 문서 등)</label><input type="url" id="opsLinkUrl" placeholder="https://..." value="${escapeHtml(currentUrl)}"></div>
+        <div class="grid-2" style="margin-top:10px;">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="submit" class="btn">저장</button>
+        </div>
+        ${currentUrl ? `<button type="button" class="btn danger" id="removeLinkBtn" style="width:100%;margin-top:8px;">링크 삭제</button>` : ""}
+      </form>
+    </div></div>`;
+  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  document.getElementById("opsLinkForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const url = document.getElementById("opsLinkUrl").value.trim();
+    if (!url) { root.innerHTML = ""; return; }
+    await setDoc(doc(db, "opsLinks", cellId), {
+      branchId, categoryId, url, updatedAt: new Date().toISOString(), updatedBy: state.profile.name
+    });
+    root.innerHTML = "";
+    showToast("저장되었습니다.");
+    renderSection("operation");
+  });
+  const removeBtn = document.getElementById("removeLinkBtn");
+  if (removeBtn) {
+    removeBtn.onclick = async () => {
+      if (!confirm("이 링크를 삭제할까요?")) return;
+      await deleteDoc(doc(db, "opsLinks", cellId));
+      root.innerHTML = "";
+      showToast("삭제되었습니다.");
+      renderSection("operation");
+    };
+  }
+}
+
+
 const state = { user:null, profile:null, branches:[], customFolders:[], currentSection:"schedule", branchFilter:{}, navExpanded:{} };
 
 /* ===================== 인증 확인 ===================== */
@@ -572,6 +713,7 @@ async function renderSection(key) {
   if (section.isScheduleSheet) { renderScheduleSheet(section); return; }
   if (section.cardView) { renderLogCards(section); return; }
   if (section.isBranchSheet) { renderBranchSheet(section); return; }
+  if (section.isOpsGrid) { renderOpsGrid(section); return; }
   const branchId = state.branchFilter[key];
   const branchLabel = section.hasBranchSubmenu
     ? (state.profile.role === "leader"

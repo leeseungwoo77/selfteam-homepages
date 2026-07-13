@@ -48,13 +48,20 @@ service cloud.firestore {
     match /teamMeetings/{id} { allow read, write: if isSignedIn(); }
     match /study/{id}        { allow read, write: if isSignedIn(); }
 
+    // 지점 운영 자료 대시보드 - 양식(행) 종류는 팀장만 관리
+    match /opsCategories/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
+    // 지점 운영 자료 링크 - 팀장은 전체, 팀원은 자기 지점 칸만 수정 (전체 열람은 모두 가능)
+    match /opsLinks/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch());
+      allow delete: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
+    }
+
     // 지점별 데이터 - 팀장은 전체, 팀원은 자기 담당 지점 데이터만
     match /directorMeetings/{id} { allow read, write: if isLeader(); }
     match /memberMeetings/{id}   { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
                                     allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
     match /performance/{id}      { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
-                                    allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
-    match /operations/{id}       { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
                                     allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
   }
 }
