@@ -455,10 +455,24 @@ async function renderOpsGrid(section) {
 function renderCategoryList(categories) {
   const wrap = document.getElementById("categoryList");
   if (!categories.length) { wrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 등록된 양식이 없습니다.</p>`; return; }
-  wrap.innerHTML = `<table><thead><tr><th>양식 이름</th><th></th></tr></thead><tbody>
-    ${categories.map(c => `<tr><td>${escapeHtml(c.label)}</td>
-      <td class="actions"><button class="icon-btn danger" data-cid="${c.id}">삭제</button></td></tr>`).join("")}
+  wrap.innerHTML = `<table><thead><tr><th></th><th>양식 이름</th><th></th></tr></thead><tbody>
+    ${categories.map((c, i) => `<tr>
+      <td style="white-space:nowrap;">
+        <button class="icon-btn" data-move="up" data-idx="${i}" ${i === 0 ? "disabled style='opacity:.3;'" : ""}>▲</button>
+        <button class="icon-btn" data-move="down" data-idx="${i}" ${i === categories.length - 1 ? "disabled style='opacity:.3;'" : ""}>▼</button>
+      </td>
+      <td>${escapeHtml(c.label)}</td>
+      <td class="actions">
+        <button class="icon-btn" data-edit-cat="${c.id}" data-label="${escapeHtml(c.label)}">수정</button>
+        <button class="icon-btn danger" data-cid="${c.id}">삭제</button>
+      </td></tr>`).join("")}
   </tbody></table>`;
+  wrap.querySelectorAll("[data-move]").forEach(btn => {
+    btn.onclick = () => moveCategory(categories, parseInt(btn.dataset.idx, 10), btn.dataset.move);
+  });
+  wrap.querySelectorAll("[data-edit-cat]").forEach(btn => {
+    btn.onclick = () => openCategoryEditModal(btn.dataset.editCat, btn.dataset.label);
+  });
   wrap.querySelectorAll("[data-cid]").forEach(btn => {
     btn.onclick = async () => {
       if (!confirm("이 양식(행)을 삭제할까요? 등록된 링크들도 함께 안 보이게 됩니다.")) return;
@@ -466,6 +480,44 @@ function renderCategoryList(categories) {
       showToast("삭제되었습니다.");
       renderSection("operation");
     };
+  });
+}
+
+async function moveCategory(categories, index, direction) {
+  const swapWith = direction === "up" ? index - 1 : index + 1;
+  if (swapWith < 0 || swapWith >= categories.length) return;
+  const a = categories[index], b = categories[swapWith];
+  const orderA = a.order || 0, orderB = b.order || 0;
+  await Promise.all([
+    updateDoc(doc(db, "opsCategories", a.id), { order: orderB }),
+    updateDoc(doc(db, "opsCategories", b.id), { order: orderA })
+  ]);
+  renderSection("operation");
+}
+
+function openCategoryEditModal(categoryId, currentLabel) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>양식 이름 수정</h3>
+      <form id="categoryEditForm">
+        <div class="field"><label>양식 이름</label><input type="text" id="categoryEditLabel" value="${escapeHtml(currentLabel)}" required></div>
+        <div class="grid-2" style="margin-top:10px;">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="submit" class="btn">저장</button>
+        </div>
+      </form>
+    </div></div>`;
+  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  document.getElementById("categoryEditForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const label = document.getElementById("categoryEditLabel").value.trim();
+    if (!label) return;
+    await updateDoc(doc(db, "opsCategories", categoryId), { label });
+    root.innerHTML = "";
+    showToast("수정되었습니다.");
+    renderSection("operation");
   });
 }
 
