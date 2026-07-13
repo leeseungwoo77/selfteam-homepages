@@ -421,12 +421,11 @@ async function renderOpsGrid(section) {
     </div>
     ${state.profile.role === "leader" ? `
     <div class="card" id="categoryAdminCard">
-      <h2>양식(행) 종류 관리</h2>
+      <h2>양식(행) 추가</h2>
       <form id="categoryForm" class="grid-2">
         <input type="text" id="newCategoryLabel" placeholder="예: 등록현황, 주간회의록..." required>
         <button class="btn" type="submit">추가</button>
       </form>
-      <div id="categoryList" style="margin-top:14px;"></div>
     </div>` : ""}
     <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="opsGridWrap">불러오는 중...</div></div>`;
 
@@ -446,41 +445,9 @@ async function renderOpsGrid(section) {
       showToast("추가되었습니다.");
       renderOpsGrid(section);
     });
-    renderCategoryList(categories);
   }
 
   renderOpsTable(categories, branchesSorted, linksMap);
-}
-
-function renderCategoryList(categories) {
-  const wrap = document.getElementById("categoryList");
-  if (!categories.length) { wrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 등록된 양식이 없습니다.</p>`; return; }
-  wrap.innerHTML = `<table><thead><tr><th></th><th>양식 이름</th><th></th></tr></thead><tbody>
-    ${categories.map((c, i) => `<tr>
-      <td style="white-space:nowrap;">
-        <button class="icon-btn" data-move="up" data-idx="${i}" ${i === 0 ? "disabled style='opacity:.3;'" : ""}>▲</button>
-        <button class="icon-btn" data-move="down" data-idx="${i}" ${i === categories.length - 1 ? "disabled style='opacity:.3;'" : ""}>▼</button>
-      </td>
-      <td>${escapeHtml(c.label)}</td>
-      <td class="actions">
-        <button class="icon-btn" data-edit-cat="${c.id}" data-label="${escapeHtml(c.label)}">수정</button>
-        <button class="icon-btn danger" data-cid="${c.id}">삭제</button>
-      </td></tr>`).join("")}
-  </tbody></table>`;
-  wrap.querySelectorAll("[data-move]").forEach(btn => {
-    btn.onclick = () => moveCategory(categories, parseInt(btn.dataset.idx, 10), btn.dataset.move);
-  });
-  wrap.querySelectorAll("[data-edit-cat]").forEach(btn => {
-    btn.onclick = () => openCategoryEditModal(btn.dataset.editCat, btn.dataset.label);
-  });
-  wrap.querySelectorAll("[data-cid]").forEach(btn => {
-    btn.onclick = async () => {
-      if (!confirm("이 양식(행)을 삭제할까요? 등록된 링크들도 함께 안 보이게 됩니다.")) return;
-      await deleteDoc(doc(db, "opsCategories", btn.dataset.cid));
-      showToast("삭제되었습니다.");
-      renderSection("operation");
-    };
-  });
 }
 
 async function moveCategory(categories, index, direction) {
@@ -525,10 +492,11 @@ function renderOpsTable(categories, branchesSorted, linksMap) {
   const wrap = document.getElementById("opsGridWrap");
   if (!branchesSorted.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다. "지점 · 팀원 관리"에서 지점을 먼저 추가해주세요.</div>`; return; }
   if (!categories.length) { wrap.innerHTML = `<div class="empty-state">${state.profile.role === "leader" ? "위에서 양식을 먼저 추가해주세요." : "아직 등록된 양식이 없습니다."}</div>`; return; }
+  const isLeaderView = state.profile.role === "leader";
 
   let html = `<table style="min-width:700px;"><thead><tr><th style="position:sticky;left:0;background:#F4FAEF;">양식</th>
-    ${branchesSorted.map(b => `<th>${escapeHtml(b.name)}</th>`).join("")}</tr></thead><tbody>`;
-  categories.forEach(cat => {
+    ${branchesSorted.map(b => `<th>${escapeHtml(b.name)}</th>`).join("")}${isLeaderView ? `<th>관리</th>` : ""}</tr></thead><tbody>`;
+  categories.forEach((cat, i) => {
     html += `<tr><td style="font-weight:700;position:sticky;left:0;background:#fff;white-space:nowrap;">${escapeHtml(cat.label)}</td>`;
     branchesSorted.forEach(b => {
       const cellId = `${b.id}_${cat.id}`;
@@ -543,6 +511,14 @@ function renderOpsTable(categories, branchesSorted, linksMap) {
         html += `<td>${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">+ 링크 추가</button>` : `<span style="color:var(--text-muted);font-size:12px;">-</span>`}</td>`;
       }
     });
+    if (isLeaderView) {
+      html += `<td style="white-space:nowrap;">
+        <button class="icon-btn" data-move="up" data-idx="${i}" ${i === 0 ? "disabled style='opacity:.3;'" : ""}>▲</button>
+        <button class="icon-btn" data-move="down" data-idx="${i}" ${i === categories.length - 1 ? "disabled style='opacity:.3;'" : ""}>▼</button>
+        <button class="icon-btn" data-edit-cat="${cat.id}" data-label="${escapeHtml(cat.label)}">수정</button>
+        <button class="icon-btn danger" data-cid="${cat.id}">삭제</button>
+      </td>`;
+    }
     html += `</tr>`;
   });
   html += `</tbody></table>`;
@@ -550,6 +526,20 @@ function renderOpsTable(categories, branchesSorted, linksMap) {
 
   wrap.querySelectorAll("[data-edit-cell]").forEach(btn => {
     btn.onclick = () => openOpsLinkModal(btn.dataset.editCell, btn.dataset.branch, btn.dataset.cat, linksMap[btn.dataset.editCell]?.url || "");
+  });
+  wrap.querySelectorAll("[data-move]").forEach(btn => {
+    btn.onclick = () => moveCategory(categories, parseInt(btn.dataset.idx, 10), btn.dataset.move);
+  });
+  wrap.querySelectorAll("[data-edit-cat]").forEach(btn => {
+    btn.onclick = () => openCategoryEditModal(btn.dataset.editCat, btn.dataset.label);
+  });
+  wrap.querySelectorAll("[data-cid]").forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm("이 양식(행)을 삭제할까요? 등록된 링크들도 함께 안 보이게 됩니다.")) return;
+      await deleteDoc(doc(db, "opsCategories", btn.dataset.cid));
+      showToast("삭제되었습니다.");
+      renderSection("operation");
+    };
   });
 }
 
