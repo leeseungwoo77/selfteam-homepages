@@ -676,6 +676,7 @@ function folderToSection(folder) {
     fields: [
       { key: "title", label: "제목", type: "text" },
       { key: "content", label: "내용", type: "richtext" },
+      { key: "link", label: "첨부 링크(URL)", type: "link" },
       { key: "images", label: "첨부 이미지", type: "imageUpload" }
     ]
   };
@@ -948,6 +949,9 @@ async function renderLogCards(section) {
     const bodyHtml = bodyFields.map(f => {
       const val = d[f.key];
       if (!val) return "";
+      if (f.type === "link") {
+        return `<div style="margin:12px 0 4px;"><a href="${escapeHtml(String(val))}" target="_blank" rel="noopener" class="ops-open-btn" style="background:var(--blue-deep);">🔗 ${escapeHtml(f.label)} 열기</a></div>`;
+      }
       const rendered = f.type === "richtext"
         ? sanitizeRichHtml(String(val))
         : escapeHtml(String(val)).replace(/\n/g, "<br>");
@@ -1205,6 +1209,9 @@ function fieldInput(field, value) {
   const v = value ?? "";
   if (field.type === "textarea") {
     return `<textarea id="f_${field.key}" rows="3">${escapeHtml(String(v))}</textarea>`;
+  }
+  if (field.type === "link") {
+    return `<input type="url" id="f_${field.key}" placeholder="https://..." value="${escapeHtml(String(v))}">`;
   }
   if (field.type === "branchSelect") {
     if (state.profile.role !== "leader") {
