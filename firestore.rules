@@ -5,6 +5,7 @@ service cloud.firestore {
     function isSignedIn() { return request.auth != null; }
     function myProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function isLeader() { return isSignedIn() && myProfile().role == 'leader'; }
+    function canViewAll() { return isSignedIn() && (myProfile().role == 'leader' || myProfile().role == 'viewer'); }
     function myBranch() { return myProfile().branchId; }
 
     // 사용자 프로필: 본인은 생성 가능, 본인 또는 팀장은 읽기/수정 가능
@@ -59,11 +60,13 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
     }
 
-    // 지점별 데이터 - 팀장은 전체, 팀원은 자기 담당 지점 데이터만
-    match /directorMeetings/{id} { allow read, write: if isLeader(); }
-    match /memberMeetings/{id}   { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
+    // 지점별 데이터 - 팀장은 전체, 팀원은 자기 담당 지점 데이터만, viewer(예: 대표님)는 전체 열람만
+    match /directorMeetings/{id} { allow read: if canViewAll(); allow write: if isLeader(); }
+    match /memberMeetings/{id}   { allow read: if isSignedIn() && (canViewAll() || resource.data.branchId == myBranch());
+                                    allow write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
                                     allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
-    match /performance/{id}      { allow read, write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
+    match /performance/{id}      { allow read: if isSignedIn() && (canViewAll() || resource.data.branchId == myBranch());
+                                    allow write: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
                                     allow create: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch()); }
   }
 }

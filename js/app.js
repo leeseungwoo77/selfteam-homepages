@@ -364,7 +364,7 @@ function renderPlainSheetTable(container, rows) {
 
 async function renderBranchSheet(section) {
   const main = document.getElementById("mainContent");
-  const branchId = state.profile.role === "leader" ? state.branchFilter[section.key] : state.profile.branchId;
+  const branchId = canViewAllRole() ? state.branchFilter[section.key] : state.profile.branchId;
   const branchObj = branchId ? state.branches.find(b => b.id === branchId) : null;
   const tabName = branchObj ? `${stripBranchSuffix(branchObj.name)}_2026` : "셀프팀_2026";
   const label = branchObj ? branchObj.name : "전체";
@@ -411,6 +411,7 @@ async function loadOpsLinks() {
 
 function canEditOpsCell(branchId) {
   if (state.profile.role === "leader") return true;
+  if (state.profile.role === "viewer") return false;
   return state.profile.branchId === branchId;
 }
 
@@ -613,7 +614,7 @@ onAuthStateChanged(auth, async (user) => {
 
   document.getElementById("whoBox").innerHTML = `
     <div class="name">${escapeHtml(state.profile.name || user.email)}</div>
-    <div class="role">${state.profile.role === "leader" ? "팀장" : "팀원 · " + escapeHtml(state.profile.branchName || "")}</div>`;
+    <div class="role">${state.profile.role === "leader" ? "팀장" : state.profile.role === "viewer" ? "전체 열람 (뷰어)" : "팀원 · " + escapeHtml(state.profile.branchName || "")}</div>`;
 
   await loadBranches();
   await loadCustomFolders();
@@ -693,14 +694,14 @@ function getSectionByKey(key) {
 function buildNav() {
   const nav = document.getElementById("navGroups");
   let html = "";
-  const allBuiltIn = SECTIONS.filter(s => !s.leaderOnly || state.profile.role === "leader").map(withOverride);
+  const allBuiltIn = SECTIONS.filter(s => !s.leaderOnly || canViewAllRole()).map(withOverride);
   const allFolders = state.customFolders.map(f => withOverride(folderToSection(f)));
   const allItems = [...allBuiltIn, ...allFolders];
   GROUP_ORDER.forEach(group => {
     const items = allItems.filter(s => s.group === group);
     html += `<div class="nav-group"><div class="nav-group-label">${group}</div>`;
     items.forEach(s => {
-      const expandable = s.hasBranchSubmenu && state.profile.role === "leader";
+      const expandable = s.hasBranchSubmenu && canViewAllRole();
       const expanded = !!state.navExpanded[s.key];
       html += `<div class="nav-item" data-key="${s.key}" data-branch="" data-expandable="${expandable}" style="--nav-color:${COLOR_HEX[s.color]}">
         <span class="nav-label"><span class="dot" style="background:${COLOR_HEX[s.color]}"></span>${s.label}</span>
@@ -759,13 +760,17 @@ function markActiveNav(key) {
 }
 
 /* ===================== 권한 판단 ===================== */
+function canViewAllRole() { return state.profile.role === "leader" || state.profile.role === "viewer"; }
+
 function canWriteSection(section) {
+  if (state.profile.role === "viewer") return false;
   if (state.profile.role === "leader") return true;
   if (section.writable === "all") return true;
   if (section.writable === "leader-and-branch") return true; // 자기 지점 데이터만, 저장 시 branchId 강제
   return false;
 }
 function canEditDoc(section, data) {
+  if (state.profile.role === "viewer") return false;
   if (state.profile.role === "leader") return true;
   if (section.writable === "all") return true;
   if (section.writable === "leader-and-branch") return data.branchId === state.profile.branchId;
@@ -787,7 +792,7 @@ async function renderSection(key) {
   if (section.isOkr) { renderOkrFolder(section); return; }
   const branchId = state.branchFilter[key];
   const branchLabel = section.hasBranchSubmenu
-    ? (state.profile.role === "leader"
+    ? (canViewAllRole()
         ? (branchId ? " · " + (state.branches.find(b => b.id === branchId)?.name || "") : " · 전체")
         : " · " + (state.profile.branchName || ""))
     : "";
@@ -815,7 +820,7 @@ async function fetchDocs(section) {
   let q;
   if (section.scope === "custom") {
     q = query(colRef, where("folderId", "==", section.folderId));
-  } else if (section.scope === "branch" && state.profile.role !== "leader") {
+  } else if (section.scope === "branch" && !canViewAllRole()) {
     q = query(colRef, where("branchId", "==", state.profile.branchId));
   } else if (section.scope === "branch" && state.branchFilter[section.key]) {
     q = query(colRef, where("branchId", "==", state.branchFilter[section.key]));
@@ -898,7 +903,7 @@ async function renderLogCards(section) {
   const main = document.getElementById("mainContent");
   const branchId = state.branchFilter[section.key];
   const branchLabel = section.hasBranchSubmenu
-    ? (state.profile.role === "leader"
+    ? (canViewAllRole()
         ? (branchId ? " · " + (state.branches.find(b => b.id === branchId)?.name || "") : " · 전체")
         : " · " + (state.profile.branchName || ""))
     : "";
@@ -1545,19 +1550,26 @@ async function renderAdmin() {
   const usersSnap = await getDocs(collection(db, "users"));
   const users = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   const userWrap = document.getElementById("userTable");
+  const roleLabel = (r) => r === "leader" ? "팀장" : r === "viewer" ? "전체 열람(뷰어)" : "팀원";
   userWrap.innerHTML = `<table><thead><tr><th>이름</th><th>이메일</th><th>지점</th><th>권한</th><th></th></tr></thead><tbody>
     ${users.map(u => `<tr>
       <td>${escapeHtml(u.name || "")}</td>
       <td>${escapeHtml(u.email || "")}</td>
       <td>${escapeHtml(u.branchName || "")}</td>
-      <td>${u.role === "leader" ? "팀장" : "팀원"}</td>
-      <td class="actions">${u.role === "leader" ? "" : `<button class="icon-btn" data-uid="${u.id}">팀장 권한 부여</button>`}</td>
+      <td>${roleLabel(u.role)}</td>
+      <td class="actions">
+        ${u.role !== "leader" ? `<button class="icon-btn" data-role-btn="leader" data-uid="${u.id}">팀장 권한 부여</button>` : ""}
+        ${u.role !== "viewer" ? `<button class="icon-btn" data-role-btn="viewer" data-uid="${u.id}">전체 열람 권한 부여</button>` : ""}
+        ${u.role !== "member" ? `<button class="icon-btn" data-role-btn="member" data-uid="${u.id}">일반 팀원으로</button>` : ""}
+      </td>
     </tr>`).join("")}
   </tbody></table>`;
-  userWrap.querySelectorAll("[data-uid]").forEach(btn => {
+  userWrap.querySelectorAll("[data-role-btn]").forEach(btn => {
     btn.onclick = async () => {
-      if (!confirm("이 팀원에게 팀장 권한을 부여할까요?")) return;
-      await updateDoc(doc(db, "users", btn.dataset.uid), { role: "leader" });
+      const target = btn.dataset.roleBtn;
+      const labels = { leader: "팀장", viewer: "전체 열람(뷰어)", member: "일반 팀원" };
+      if (!confirm(`이 사용자를 "${labels[target]}" 권한으로 바꿀까요?`)) return;
+      await updateDoc(doc(db, "users", btn.dataset.uid), { role: target });
       showToast("권한이 변경되었습니다.");
       renderAdmin();
     };
