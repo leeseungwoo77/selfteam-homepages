@@ -31,6 +31,8 @@ service cloud.firestore {
 
     // 사용자 정의 폴더 - 팀장만 폴더 생성/삭제, 로그인한 누구나 목록 조회
     match /customFolders/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
+    // 기존 메뉴의 이름/그룹/색상 수정본 - 팀장만 수정, 로그인한 누구나 조회
+    match /menuOverrides/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
     // 폴더 안의 게시물 - 팀장은 항상 가능, 폴더가 "전원 작성 가능"이면 로그인한 누구나 작성 가능
     match /folderEntries/{id} {
       allow read: if isSignedIn();

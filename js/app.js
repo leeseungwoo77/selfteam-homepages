@@ -28,9 +28,10 @@ const SECTIONS = [
   { key:"teamMeeting", label:"팀 회의 일지", group:"일정 · 미팅", color:"green",
     collectionName:"teamMeetings", scope:"team", writable:"all",
     desc:"팀 전체 회의 내용을 기록합니다.",
-    cardView:true, headerFields:["date","attendees"],
+    cardView:true, headerFields:["title","date","attendees"],
     extraLink:{ label:"회의록 원본 열기", url:"https://docs.google.com/presentation/d/1xrRu5zRNooseQG-fHA4D8v6SDc1eEsDmMgc7e2pDhUs/edit" },
     fields:[
+      { key:"title", label:"제목", type:"text" },
       { key:"date", label:"날짜", type:"date" },
       { key:"attendees", label:"참석자", type:"text" },
       { key:"agenda", label:"안건", type:"textarea" },
@@ -42,8 +43,9 @@ const SECTIONS = [
   { key:"directorMeeting", label:"지점 원장 미팅 일지", group:"일정 · 미팅", color:"green",
     collectionName:"directorMeetings", scope:"branch", writable:"leader",
     desc:"지점 원장님과의 미팅 내용을 기록합니다. (팀장만 열람 가능)",
-    hasBranchSubmenu:true, leaderOnly:true, cardView:true, headerFields:["date","branchName","director"],
+    hasBranchSubmenu:true, leaderOnly:true, cardView:true, headerFields:["title","date","branchName","director"],
     fields:[
+      { key:"title", label:"제목", type:"text" },
       { key:"date", label:"날짜", type:"date" },
       { key:"branchId", label:"지점", type:"branchSelect" },
       { key:"director", label:"원장 이름", type:"text" },
@@ -54,8 +56,9 @@ const SECTIONS = [
   { key:"memberMeeting", label:"지점 팀원 개별 미팅 일지", group:"일정 · 미팅", color:"green",
     collectionName:"memberMeetings", scope:"branch", writable:"leader-and-branch",
     desc:"지점 팀원과의 개별 미팅 내용을 기록합니다.",
-    hasBranchSubmenu:true, cardView:true, headerFields:["date","branchName","memberName"],
+    hasBranchSubmenu:true, cardView:true, headerFields:["title","date","branchName","memberName"],
     fields:[
+      { key:"title", label:"제목", type:"text" },
       { key:"date", label:"날짜", type:"date" },
       { key:"branchId", label:"지점", type:"branchSelect" },
       { key:"memberName", label:"팀원 이름", type:"text" },
@@ -329,7 +332,7 @@ function renderSheetList(years) {
       if (!confirm("이 연도 등록을 삭제할까요? (구글 시트 자체는 삭제되지 않습니다)")) return;
       await deleteDoc(doc(db, "scheduleSheets", btn.dataset.sid));
       showToast("삭제되었습니다.");
-      renderScheduleSheet(SECTIONS.find(s => s.key === "schedule"));
+      renderScheduleSheet(getSectionByKey("schedule"));
     };
   });
 }
@@ -583,7 +586,7 @@ function openOpsLinkModal(cellId, branchId, categoryId, currentUrl) {
 }
 
 
-const state = { user:null, profile:null, branches:[], customFolders:[], currentSection:"schedule", branchFilter:{}, navExpanded:{} };
+const state = { user:null, profile:null, branches:[], customFolders:[], menuOverrides:{}, currentSection:"schedule", branchFilter:{}, navExpanded:{} };
 
 /* ===================== 인증 확인 ===================== */
 onAuthStateChanged(auth, async (user) => {
@@ -613,6 +616,7 @@ onAuthStateChanged(auth, async (user) => {
 
   await loadBranches();
   await loadCustomFolders();
+  await loadMenuOverrides();
   buildNav();
   renderSection(state.currentSection);
 });
@@ -632,9 +636,23 @@ async function loadCustomFolders() {
   state.customFolders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
+async function loadMenuOverrides() {
+  const snap = await getDocs(collection(db, "menuOverrides"));
+  const map = {};
+  snap.docs.forEach(d => { map[d.id] = d.data(); });
+  state.menuOverrides = map;
+}
+
+/* 팀장이 이름/그룹/색상을 바꾼 메뉴가 있으면 기본값 위에 덮어씌우기 */
+function withOverride(section) {
+  const o = state.menuOverrides[section.key];
+  if (!o) return section;
+  return { ...section, label: o.label || section.label, group: o.group || section.group, color: o.color || section.color };
+}
+
 /* 팀장이 만든 "사용자 정의 폴더"를 기존 SECTIONS 항목과 동일한 방식으로 다루기 위한 변환 */
 function folderToSection(folder) {
-  return {
+  const base = {
     key: "folder_" + folder.id,
     label: folder.label,
     group: folder.group,
@@ -643,9 +661,16 @@ function folderToSection(folder) {
     scope: "custom",
     folderId: folder.id,
     writable: folder.writable || "leader",
+    template: folder.template || "standard",
+    desc: folder.desc || ""
+  };
+  if (folder.template === "okr") {
+    return { ...base, isOkr: true, desc: folder.desc || "시즌별 OKR(Objective · Key Result · Key Task)을 관리합니다." };
+  }
+  return {
+    ...base,
     cardView: true,
     headerFields: ["title"],
-    desc: folder.desc || "",
     fields: [
       { key: "title", label: "제목", type: "text" },
       { key: "content", label: "내용", type: "richtext" },
@@ -657,19 +682,21 @@ function folderToSection(folder) {
 function getSectionByKey(key) {
   if (key.startsWith("folder_")) {
     const folder = state.customFolders.find(f => "folder_" + f.id === key);
-    return folder ? folderToSection(folder) : null;
+    return folder ? withOverride(folderToSection(folder)) : null;
   }
-  return SECTIONS.find(s => s.key === key);
+  const s = SECTIONS.find(s => s.key === key);
+  return s ? withOverride(s) : null;
 }
 
 /* ===================== 사이드바 네비게이션 ===================== */
 function buildNav() {
   const nav = document.getElementById("navGroups");
   let html = "";
+  const allBuiltIn = SECTIONS.filter(s => !s.leaderOnly || state.profile.role === "leader").map(withOverride);
+  const allFolders = state.customFolders.map(f => withOverride(folderToSection(f)));
+  const allItems = [...allBuiltIn, ...allFolders];
   GROUP_ORDER.forEach(group => {
-    const builtIn = SECTIONS.filter(s => s.group === group && (!s.leaderOnly || state.profile.role === "leader"));
-    const folders = state.customFolders.filter(f => f.group === group).map(folderToSection);
-    const items = [...builtIn, ...folders];
+    const items = allItems.filter(s => s.group === group);
     html += `<div class="nav-group"><div class="nav-group-label">${group}</div>`;
     items.forEach(s => {
       const expandable = s.hasBranchSubmenu && state.profile.role === "leader";
@@ -756,6 +783,7 @@ async function renderSection(key) {
   if (section.cardView) { renderLogCards(section); return; }
   if (section.isBranchSheet) { renderBranchSheet(section); return; }
   if (section.isOpsGrid) { renderOpsGrid(section); return; }
+  if (section.isOkr) { renderOkrFolder(section); return; }
   const branchId = state.branchFilter[key];
   const branchLabel = section.hasBranchSubmenu
     ? (state.profile.role === "leader"
@@ -904,7 +932,11 @@ async function renderLogCards(section) {
 
   wrap.innerHTML = docs.map(d => {
     const editable = canEditDoc(section, d);
-    const headerText = section.headerFields.map(k => d[k]).filter(Boolean).map(escapeHtml).join(" · ");
+    const metaKeys = section.headerFields.filter(k => k !== "title");
+    const metaParts = metaKeys.map(k => d[k]).filter(Boolean).map(escapeHtml);
+    if (d.createdAt) metaParts.push("업로드: " + escapeHtml(String(d.createdAt).slice(0, 10)));
+    const metaText = metaParts.join(" · ");
+    const titleText = d.title ? escapeHtml(d.title) : (metaParts.length ? "" : "(제목 없음)");
     const images = imageField ? (d[imageField.key] || []).filter(Boolean) : [];
 
     const bodyHtml = bodyFields.map(f => {
@@ -918,7 +950,10 @@ async function renderLogCards(section) {
 
     return `<div class="card meeting-card">
       <div class="log-summary" data-toggle="${d.id}">
-        <div style="font-weight:800;font-size:15px;">${headerText}<span class="log-chevron">›</span></div>
+        <div>
+          ${titleText ? `<div style="font-weight:800;font-size:15px;">${titleText}</div>` : ""}
+          <div style="font-size:12px;color:var(--text-muted);margin-top:${titleText ? "2px" : "0"};${!titleText ? "font-weight:800;font-size:15px;color:var(--text-main);" : ""}">${metaText}<span class="log-chevron">›</span></div>
+        </div>
         ${editable ? `<div>
           <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
           <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
@@ -952,6 +987,170 @@ async function renderLogCards(section) {
       showToast("삭제되었습니다.");
       renderSection(section.key);
     };
+  });
+}
+
+/* ===================== OKR 폴더 (시즌 · Objective · KR · KT) ===================== */
+function seasonOptions() {
+  const seasons = [
+    { n: 1, label: "1시즌 (3~5월)" },
+    { n: 2, label: "2시즌 (6~8월)" },
+    { n: 3, label: "3시즌 (9~11월)" },
+    { n: 4, label: "4시즌 (12~2월)" }
+  ];
+  const thisYear = new Date().getFullYear();
+  const opts = [];
+  for (let y = thisYear - 1; y <= thisYear + 1; y++) {
+    seasons.forEach(s => opts.push(`${y}년 ${s.label}`));
+  }
+  return opts;
+}
+
+async function renderOkrFolder(section) {
+  const main = document.getElementById("mainContent");
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <p>${section.desc}</p>
+      </div>
+      ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새 OKR 등록</button>` : ""}
+    </div>
+    <div id="okrList">불러오는 중...</div>`;
+
+  if (canWriteSection(section)) {
+    document.getElementById("addBtn").onclick = () => openOkrModal(section, null);
+  }
+
+  const docs = await fetchDocs(section);
+  const wrap = document.getElementById("okrList");
+  if (!docs.length) {
+    wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>아직 등록된 OKR이 없습니다.</div></div>`;
+    return;
+  }
+
+  wrap.innerHTML = docs.map(d => {
+    const editable = canEditDoc(section, d);
+    const krs = d.krs || [];
+    const overall = krs.length ? Math.round(krs.reduce((s, k) => s + (k.achievement || 0), 0) / krs.length) : 0;
+    const objectivePreview = (d.objective || "").slice(0, 50) + ((d.objective || "").length > 50 ? "…" : "");
+    return `<div class="card meeting-card">
+      <div class="log-summary" data-toggle="${d.id}">
+        <div>
+          <div style="font-weight:800;font-size:15px;">${escapeHtml(d.season || "")}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${escapeHtml(objectivePreview)} · 종합 달성율 ${overall}%<span class="log-chevron">›</span></div>
+        </div>
+        ${editable ? `<div>
+          <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
+          <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
+        </div>` : ""}
+      </div>
+      <div class="log-body" id="body_${d.id}">
+        <p style="margin:0 0 14px;"><strong>Objective</strong><br>${escapeHtml(d.objective || "").replace(/\n/g, "<br>")}</p>
+        ${krs.map((k, i) => `
+          <div style="margin:0 0 12px;padding:12px 14px;background:#FBFEFA;border-radius:10px;border:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+              <strong style="font-size:13.5px;">KR${i + 1}. ${escapeHtml(k.title || "")}</strong>
+              <span class="mono" style="font-weight:700;color:var(--green-deep);white-space:nowrap;">${k.achievement || 0}%</span>
+            </div>
+            <div style="background:#EAF3E3;border-radius:6px;height:8px;margin:8px 0;overflow:hidden;">
+              <div style="background:var(--green-bright);height:100%;width:${k.achievement || 0}%;"></div>
+            </div>
+            ${(k.kts || []).length ? `<ul style="margin:6px 0 0 18px;font-size:13px;line-height:1.6;">${(k.kts || []).map(kt => `<li>${escapeHtml(kt)}</li>`).join("")}</ul>` : ""}
+          </div>`).join("")}
+      </div>
+    </div>`;
+  }).join("");
+
+  wrap.querySelectorAll(".log-summary").forEach(el => {
+    el.onclick = () => {
+      const body = document.getElementById(`body_${el.dataset.toggle}`);
+      const opening = !body.classList.contains("open");
+      body.classList.toggle("open", opening);
+      el.classList.toggle("open", opening);
+    };
+  });
+  wrap.querySelectorAll('[data-act="edit"]').forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); openOkrModal(section, docs.find(d => d.id === btn.dataset.id)); };
+  });
+  wrap.querySelectorAll('[data-act="del"]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm("정말 삭제하시겠습니까?")) return;
+      await deleteDoc(doc(db, "folderEntries", btn.dataset.id));
+      showToast("삭제되었습니다.");
+      renderSection(section.key);
+    };
+  });
+}
+
+function krBlockHtml(i, kr) {
+  const k = kr || { title: "", achievement: 0, kts: [] };
+  return `<div class="card" style="background:#FBFEFA;margin-bottom:12px;padding:16px;">
+    <h2 style="font-size:14px;margin:0 0 12px;">Key Result ${i + 1}</h2>
+    <div class="field"><label>KR${i + 1} 내용 (정량적 목표)</label><input type="text" id="krTitle_${i}" value="${escapeHtml(k.title || "")}"></div>
+    <div class="field"><label>달성율 (%)</label><input type="number" id="krAch_${i}" min="0" max="100" value="${k.achievement || 0}"></div>
+    <div class="field"><label>Key Task (최대 3개)</label>
+      ${[0, 1, 2].map(j => `<input type="text" id="kt_${i}_${j}" placeholder="KT ${j + 1}" value="${escapeHtml((k.kts && k.kts[j]) || "")}" style="margin-bottom:6px;">`).join("")}
+    </div>
+  </div>`;
+}
+
+function openOkrModal(section, existing) {
+  const root = document.getElementById("modalRoot");
+  const seasons = seasonOptions();
+  const krs = (existing && existing.krs) || [{}, {}, {}];
+
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal" style="max-width:560px;">
+      <h3>${existing ? "수정" : "새 OKR 등록"} · ${section.label}</h3>
+      <form id="okrForm">
+        <div class="field"><label>시즌</label>
+          <select id="okrSeason">${seasons.map(s => `<option value="${s}" ${existing && existing.season === s ? "selected" : ""}>${s}</option>`).join("")}</select>
+        </div>
+        <div class="field"><label>Objective (목적 · 정성적 서술)</label><textarea id="okrObjective" rows="2">${escapeHtml((existing && existing.objective) || "")}</textarea></div>
+        ${[0, 1, 2].map(i => krBlockHtml(i, krs[i])).join("")}
+        <div class="grid-2" style="margin-top:10px;">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="submit" class="btn" id="saveBtn">저장</button>
+        </div>
+      </form>
+    </div></div>`;
+
+  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+
+  document.getElementById("okrForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const saveBtn = document.getElementById("saveBtn");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "저장 중...";
+    try {
+      const season = document.getElementById("okrSeason").value;
+      const objective = document.getElementById("okrObjective").value.trim();
+      const krsData = [0, 1, 2].map(i => ({
+        title: document.getElementById(`krTitle_${i}`).value.trim(),
+        achievement: Math.max(0, Math.min(100, parseInt(document.getElementById(`krAch_${i}`).value, 10) || 0)),
+        kts: [0, 1, 2].map(j => document.getElementById(`kt_${i}_${j}`).value.trim()).filter(Boolean)
+      }));
+      const data = {
+        folderId: section.folderId, season, objective, krs: krsData,
+        updatedAt: new Date().toISOString(), updatedBy: state.profile.name
+      };
+      if (existing) {
+        await updateDoc(doc(db, "folderEntries", existing.id), data);
+      } else {
+        data.createdAt = new Date().toISOString();
+        data.createdBy = state.profile.name;
+        await addDoc(collection(db, "folderEntries"), data);
+      }
+      root.innerHTML = "";
+      showToast("저장되었습니다.");
+      renderSection(section.key);
+    } catch (err) {
+      alert("저장 중 오류: " + err.message);
+      saveBtn.disabled = false;
+      saveBtn.textContent = "저장";
+    }
   });
 }
 
@@ -1143,6 +1342,98 @@ function openModal(section, existing) {
 
 
 /* ===================== 관리자 화면 (지점 / 팀원) ===================== */
+function renderAllMenuList() {
+  const wrap = document.getElementById("allMenuList");
+  const allBuiltIn = SECTIONS.map(withOverride).map(s => ({ ...s, isCustom: false }));
+  const allFolders = state.customFolders.map(f => ({ ...withOverride(folderToSection(f)), isCustom: true, folderDocId: f.id }));
+  const allItems = [...allBuiltIn, ...allFolders];
+
+  wrap.innerHTML = `<table><thead><tr><th>메뉴 이름</th><th>그룹</th><th>색상</th><th></th></tr></thead><tbody>
+    ${allItems.map(it => `<tr>
+      <td>${escapeHtml(it.label)}</td>
+      <td>${escapeHtml(it.group)}</td>
+      <td><span class="dot" style="display:inline-block;background:${COLOR_HEX[it.color]};"></span></td>
+      <td class="actions">
+        <button class="icon-btn" data-edit-menu="${it.key}">수정</button>
+        ${it.isCustom ? `<button class="icon-btn danger" data-del-folder="${it.folderDocId}">삭제</button>` : ""}
+      </td>
+    </tr>`).join("")}
+  </tbody></table>`;
+
+  wrap.querySelectorAll("[data-edit-menu]").forEach(btn => {
+    btn.onclick = () => {
+      const item = allItems.find(it => it.key === btn.dataset.editMenu);
+      openMenuEditModal(item);
+    };
+  });
+  wrap.querySelectorAll("[data-del-folder]").forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm("이 폴더를 삭제하면 안의 게시물도 더 이상 보이지 않게 됩니다. 삭제할까요?")) return;
+      await deleteDoc(doc(db, "customFolders", btn.dataset.delFolder));
+      await loadCustomFolders();
+      showToast("삭제되었습니다.");
+      buildNav();
+      markActiveNav("admin");
+      renderAdmin();
+    };
+  });
+}
+
+function openMenuEditModal(item) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>메뉴 수정</h3>
+      <form id="menuEditForm">
+        <div class="field"><label>메뉴 이름</label><input type="text" id="menuEditLabel" value="${escapeHtml(item.label)}" required></div>
+        <div class="field"><label>그룹</label>
+          <select id="menuEditGroup">${GROUP_ORDER.map(g => `<option value="${g}" ${g === item.group ? "selected" : ""}>${g}</option>`).join("")}</select>
+        </div>
+        <div class="field"><label>색상</label>
+          <select id="menuEditColor">
+            <option value="blue" ${item.color === "blue" ? "selected" : ""}>파랑</option>
+            <option value="green" ${item.color === "green" ? "selected" : ""}>초록</option>
+            <option value="magenta" ${item.color === "magenta" ? "selected" : ""}>마젠타</option>
+            <option value="neutral" ${item.color === "neutral" ? "selected" : ""}>회색(기본)</option>
+          </select>
+        </div>
+        ${item.isCustom ? `<div class="field"><label>양식 종류</label>
+          <select id="menuEditTemplate">
+            <option value="standard" ${item.template !== "okr" ? "selected" : ""}>일반 (제목 + 내용 + 이미지)</option>
+            <option value="okr" ${item.template === "okr" ? "selected" : ""}>OKR (시즌 · Objective · KR · KT)</option>
+          </select>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">이미 등록된 게시물이 있는 상태에서 종류를 바꾸면 예전 글이 새 양식으로 안 보일 수 있어요.</p>
+        </div>` : ""}
+        <div class="grid-2" style="margin-top:10px;">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="submit" class="btn">저장</button>
+        </div>
+      </form>
+    </div></div>`;
+  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  document.getElementById("menuEditForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const label = document.getElementById("menuEditLabel").value.trim();
+    const group = document.getElementById("menuEditGroup").value;
+    const color = document.getElementById("menuEditColor").value;
+    if (!label) return;
+    if (item.isCustom) {
+      const template = document.getElementById("menuEditTemplate").value;
+      await updateDoc(doc(db, "customFolders", item.folderDocId), { label, group, color, template });
+      await loadCustomFolders();
+    } else {
+      await setDoc(doc(db, "menuOverrides", item.key), { label, group, color });
+      await loadMenuOverrides();
+    }
+    root.innerHTML = "";
+    showToast("저장되었습니다.");
+    buildNav();
+    markActiveNav("admin");
+    renderAdmin();
+  });
+}
+
 async function renderAdmin() {
   const main = document.getElementById("mainContent");
   main.innerHTML = `<div class="page-header"><div><h1>지점 · 팀원 관리</h1><p>지점을 추가하고 팀원 권한을 확인합니다.</p></div></div>
@@ -1154,6 +1445,11 @@ async function renderAdmin() {
       </form>
     </div>
     <div class="card"><h2>지점 목록</h2><div id="branchTable">불러오는 중...</div></div>
+    <div class="card">
+      <h2>전체 메뉴 관리</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 14px;">기존 메뉴를 포함해 모든 메뉴의 이름·그룹·색상을 바꿀 수 있어요. 직접 만든 폴더는 삭제도 가능합니다.</p>
+      <div id="allMenuList">불러오는 중...</div>
+    </div>
     <div class="card">
       <h2>새 폴더(메뉴) 만들기</h2>
       <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 14px;">제목·내용(표 포함 가능)·이미지를 자유롭게 올릴 수 있는 폴더를 직접 추가할 수 있어요. 코드 수정 없이 바로 메뉴에 반영됩니다.</p>
@@ -1176,11 +1472,18 @@ async function renderAdmin() {
             <option value="all">전원 작성 가능</option>
           </select>
         </div>
+        <div class="field" style="margin:0;"><label>양식 종류</label>
+          <select id="newFolderTemplate">
+            <option value="standard">일반 (제목 + 내용 + 이미지)</option>
+            <option value="okr">OKR (시즌 · Objective · KR · KT)</option>
+          </select>
+        </div>
         <button class="btn" type="submit" style="grid-column: span 2;">폴더 만들기</button>
       </form>
-      <div id="folderList" style="margin-top:16px;"></div>
     </div>
     <div class="card"><h2>팀원 목록</h2><div id="userTable">불러오는 중...</div></div>`;
+
+  renderAllMenuList();
 
   document.getElementById("branchForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1222,38 +1525,14 @@ async function renderAdmin() {
     const group = document.getElementById("newFolderGroup").value;
     const color = document.getElementById("newFolderColor").value;
     const writable = document.getElementById("newFolderWritable").value;
-    await addDoc(collection(db, "customFolders"), { label, group, color, writable, createdAt: new Date().toISOString() });
+    const template = document.getElementById("newFolderTemplate").value;
+    await addDoc(collection(db, "customFolders"), { label, group, color, writable, template, createdAt: new Date().toISOString() });
     await loadCustomFolders();
     showToast("폴더가 생성되었습니다.");
     buildNav();
     markActiveNav("admin");
     renderAdmin();
   });
-
-  const folderWrap = document.getElementById("folderList");
-  if (!state.customFolders.length) {
-    folderWrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 만든 폴더가 없습니다.</p>`;
-  } else {
-    folderWrap.innerHTML = `<table><thead><tr><th>이름</th><th>그룹</th><th>작성 권한</th><th></th></tr></thead><tbody>
-      ${state.customFolders.map(f => `<tr>
-        <td>${escapeHtml(f.label)}</td>
-        <td>${escapeHtml(f.group)}</td>
-        <td>${f.writable === "all" ? "전원" : "팀장만"}</td>
-        <td class="actions"><button class="icon-btn danger" data-fid="${f.id}">삭제</button></td>
-      </tr>`).join("")}
-    </tbody></table>`;
-    folderWrap.querySelectorAll("[data-fid]").forEach(btn => {
-      btn.onclick = async () => {
-        if (!confirm("이 폴더를 삭제하면 안의 게시물도 더 이상 보이지 않게 됩니다. 삭제할까요?")) return;
-        await deleteDoc(doc(db, "customFolders", btn.dataset.fid));
-        await loadCustomFolders();
-        showToast("삭제되었습니다.");
-        buildNav();
-        markActiveNav("admin");
-        renderAdmin();
-      };
-    });
-  }
 
   const usersSnap = await getDocs(collection(db, "users"));
   const users = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
