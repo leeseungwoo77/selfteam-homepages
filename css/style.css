@@ -170,6 +170,7 @@ a { color: inherit; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
 
 table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.table-compact th, .table-compact td { padding: 5px 8px !important; font-size: 12px !important; }
 th { text-align: left; color: var(--text-muted); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; padding: 8px 10px; border-bottom: 2px solid var(--border); }
 td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 tr:last-child td { border-bottom: none; }
@@ -191,6 +192,12 @@ td.actions { white-space: nowrap; text-align: right; }
 .icon-btn { background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 13px; font-weight: 700; padding: 4px 8px; }
 .icon-btn:hover { color: var(--blue-deep); }
 .icon-btn.danger:hover { color: var(--danger); }
+
+.ops-open-btn {
+  display: inline-block; padding: 4px 12px; border-radius: 20px; color: #fff; font-size: 12px;
+  font-weight: 700; text-decoration: none; margin-right: 4px; transition: filter .15s ease;
+}
+.ops-open-btn:hover { filter: brightness(1.1); }
 
 .modal-bg { position: fixed; inset: 0; background: rgba(20,30,15,0.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
 .modal { background: #fff; border-radius: 16px; padding: 28px; width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto; }

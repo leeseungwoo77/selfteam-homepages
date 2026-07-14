@@ -348,7 +348,7 @@ function renderPlainSheetTable(container, rows) {
   const colIndexes = [];
   for (let ci = 1; ci < dataRows[0].length; ci++) colIndexes.push(ci); // 0번(첫) 열도 제외
 
-  let html = `<table style="min-width:600px;width:max-content;"><tbody>`;
+  let html = `<table class="table-compact" style="width:max-content;"><tbody>`;
   dataRows.forEach(row => {
     html += `<tr>`;
     colIndexes.forEach((ci, idx) => {
@@ -505,9 +505,10 @@ function renderOpsTable(categories, branchesSorted, linksMap) {
       const cellId = `${b.id}_${cat.id}`;
       const link = linksMap[cellId];
       const editable = canEditOpsCell(b.id);
+      const branchColor = matchLocationColor(b.name) || "var(--blue-deep)";
       if (link && link.url) {
         html += `<td style="white-space:nowrap;">
-          <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="icon-btn" style="color:var(--blue-deep);">열기 ↗</a>
+          <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="ops-open-btn" style="background:${branchColor};">열기 ↗</a>
           ${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">수정</button>` : ""}
         </td>`;
       } else {
@@ -1006,6 +1007,12 @@ function seasonOptions() {
   return opts;
 }
 
+function parseSeasonKey(season) {
+  const m = String(season || "").match(/(\d{4})년\s*(\d)시즌/);
+  if (!m) return 0;
+  return parseInt(m[1], 10) * 10 + parseInt(m[2], 10);
+}
+
 async function renderOkrFolder(section) {
   const main = document.getElementById("mainContent");
   main.innerHTML = `<div class="page-header">
@@ -1022,6 +1029,7 @@ async function renderOkrFolder(section) {
   }
 
   const docs = await fetchDocs(section);
+  docs.sort((a, b) => parseSeasonKey(b.season) - parseSeasonKey(a.season));
   const wrap = document.getElementById("okrList");
   if (!docs.length) {
     wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>아직 등록된 OKR이 없습니다.</div></div>`;
