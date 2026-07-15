@@ -1274,10 +1274,14 @@ function renderRosterBranchCard(branch, data) {
 
   const years = data.years || [];
   const people = data.people || [];
+  const seed = findSeedForBranch(branch);
 
-  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap;">
     <h2 style="margin:0;">${escapeHtml(branch.name)}</h2>
-    ${isLeader ? `<button class="btn small" id="addYearBtn_${branch.id}">+ 연도 추가</button>` : ""}
+    <div style="display:flex;gap:8px;">
+      ${isLeader && seed ? `<button class="btn small secondary" id="reseedBtn_${branch.id}">기존 자료 다시 불러오기(덮어쓰기)</button>` : ""}
+      ${isLeader ? `<button class="btn small" id="addYearBtn_${branch.id}">+ 연도 추가</button>` : ""}
+    </div>
   </div>`;
 
   if (!years.length) {
@@ -1303,6 +1307,15 @@ function renderRosterBranchCard(branch, data) {
   card.innerHTML = html;
   if (!isLeader) return;
 
+  if (document.getElementById(`reseedBtn_${branch.id}`)) {
+    document.getElementById(`reseedBtn_${branch.id}`).onclick = async () => {
+      if (!confirm("지금 표를 지우고 2026년까지의 기존 자료로 덮어쓸까요? (지금까지 직접 수정한 내용이 있다면 사라집니다)")) return;
+      const newData = { years: [...seed.years], people: seed.people.map(row => row.map(c => ({ ...c }))) };
+      await setDoc(doc(db, "rosterEntries", branch.id), newData);
+      showToast("불러왔습니다.");
+      loadAndRenderRosterBranch(branch);
+    };
+  }
   if (document.getElementById(`addYearBtn_${branch.id}`)) {
     document.getElementById(`addYearBtn_${branch.id}`).onclick = () => {
       const label = prompt("추가할 연도 이름을 입력하세요 (예: 2027년)");
