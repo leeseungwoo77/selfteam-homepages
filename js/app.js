@@ -109,7 +109,11 @@ const SECTIONS = [
       { key:"title", label:"제목", type:"text" },
       { key:"content", label:"내용", type:"textarea" },
       { key:"fileLink", label:"첨부 링크(URL)", type:"text" }
-    ], columns:["title"] }
+    ], columns:["title"] },
+
+  { key:"roster", label:"지점 인적 구성", group:"자료실", color:"neutral",
+    desc:"지점별 인력 이동 현황(잔류/신규입사/이동/퇴사)을 색깔 그대로 보여줍니다.",
+    isRosterGrid:true }
 ];
 const GROUP_ORDER = ["일정 · 미팅", "성과", "소통", "자료실"];
 const COLOR_HEX = { blue:"var(--blue-bright)", green:"var(--green-bright)", magenta:"var(--magenta-bright)", neutral:"#9CA88F" };
@@ -791,6 +795,7 @@ async function renderSection(key) {
   if (section.isBranchSheet) { renderBranchSheet(section); return; }
   if (section.isOpsGrid) { renderOpsGrid(section); return; }
   if (section.isOkr) { renderOkrFolder(section); return; }
+  if (section.isRosterGrid) { renderRosterGrid(section); return; }
   const branchId = state.branchFilter[key];
   const branchLabel = section.hasBranchSubmenu
     ? (canViewAllRole()
@@ -1169,6 +1174,131 @@ function openOkrModal(section, existing) {
       saveBtn.textContent = "저장";
     }
   });
+}
+
+/* ===================== 지점 인적 구성 - 구글 시트 색상 그대로 재현 ===================== */
+const ROSTER_SPREADSHEET_ID = "1TA3ObFLBQGb9dmKlOEL4XxPmE308ifyOPhxzEzAe-I8";
+const ROSTER_SHEET_NAME = "팀원 이력";
+const ROSTER_LEGEND = [
+  { label: "잔류", color: "#0000FF" },
+  { label: "신규 입사", color: "#00FFFF" },
+  { label: "지점 이동 In", color: "#00FF00" },
+  { label: "지점 이동 Out", color: "#FF9900" },
+  { label: "타팀 이동 Out", color: "#FFFF00" },
+  { label: "퇴사", color: "#FF0000" }
+];
+
+function bgColorToHex(bg) {
+  if (!bg) return null;
+  const r = Math.round((bg.red || 0) * 255), g = Math.round((bg.green || 0) * 255), b = Math.round((bg.blue || 0) * 255);
+  if (r > 240 && g > 240 && b > 240) return null; // 흰색은 그냥 빈 셀 취급
+  return `#${[r, g, b].map(x => x.toString(16).padStart(2, "0")).join("")}`;
+}
+function textColorForBg(hex) {
+  if (!hex) return "inherit";
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6 ? "#222" : "#fff";
+}
+
+async function fetchRosterRowData() {
+  if (!googleAccessToken) await requestGoogleAuth();
+  const fields = encodeURIComponent("sheets.data.rowData.values(formattedValue,effectiveFormat.backgroundColor)");
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${ROSTER_SPREADSHEET_ID}?ranges=${encodeURIComponent(ROSTER_SHEET_NAME)}&fields=${fields}`;
+  let res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
+  if (res.status === 401) {
+    googleAccessToken = null;
+    await requestGoogleAuth();
+    res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error?.message || `시트를 불러오지 못했습니다 (${res.status})`);
+  }
+  const data = await res.json();
+  return data.sheets?.[0]?.data?.[0]?.rowData || [];
+}
+
+function parseRosterBlocks(rowData) {
+  const blocks = [];
+  let current = null;
+  rowData.forEach(row => {
+    const cells = row.values || [];
+    const colA = cells[0]?.formattedValue || "";
+    if (colA === "구분") {
+      const years = cells.slice(1).map(c => c?.formattedValue).filter(Boolean);
+      current = { branch: "", years, people: [] };
+      blocks.push(current);
+      return;
+    }
+    if (!current) return;
+    const dataCells = cells.slice(1, 1 + current.years.length).map(c => ({
+      text: c?.formattedValue || "",
+      color: bgColorToHex(c?.effectiveFormat?.backgroundColor)
+    }));
+    const rowHasContent = colA || dataCells.some(c => c.text);
+    if (!rowHasContent) { current = null; return; }
+    if (!current.branch && colA) current.branch = colA;
+    current.people.push(dataCells);
+  });
+  return blocks.filter(b => b.branch);
+}
+
+function renderRosterLegend() {
+  const el = document.getElementById("rosterLegend");
+  el.innerHTML = ROSTER_LEGEND.map(l =>
+    `<span style="display:inline-flex;align-items:center;gap:6px;margin:4px 14px 4px 0;font-size:12.5px;">
+      <span style="width:14px;height:14px;border-radius:4px;background:${l.color};display:inline-block;border:1px solid rgba(0,0,0,0.1);"></span>${escapeHtml(l.label)}
+    </span>`
+  ).join("");
+}
+
+async function renderRosterGrid(section) {
+  const main = document.getElementById("mainContent");
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <p>${section.desc}</p>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <a href="https://docs.google.com/spreadsheets/d/${ROSTER_SPREADSHEET_ID}/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">원본 시트 열기</a>
+        <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
+      </div>
+    </div>
+    <div class="card" id="rosterLegend" style="padding:14px 22px;"></div>
+    <div id="rosterWrap">${googleAccessToken ? "" : '<div class="card"><div class="empty-state">위 "구글 계정으로 연결" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요.</div></div>'}</div>`;
+
+  renderRosterLegend();
+
+  document.getElementById("googleAuthBtn").onclick = async () => {
+    try { await requestGoogleAuth(); showToast("구글 계정이 연결되었습니다."); renderSection(section.key); }
+    catch (err) { alert(err.message); }
+  };
+
+  if (!googleAccessToken) return;
+  const wrap = document.getElementById("rosterWrap");
+  wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>불러오는 중...</div></div>`;
+  try {
+    const rowData = await fetchRosterRowData();
+    const blocks = parseRosterBlocks(rowData);
+    if (!blocks.length) { wrap.innerHTML = `<div class="card"><div class="empty-state">표시할 데이터를 찾지 못했습니다.</div></div>`; return; }
+
+    wrap.innerHTML = blocks.map(block => `
+      <div class="card" style="overflow:auto;">
+        <h2 style="margin-bottom:12px;">${escapeHtml(block.branch)}</h2>
+        <table class="table-compact" style="width:max-content;min-width:100%;">
+          <thead><tr>${block.years.map(y => `<th>${escapeHtml(y)}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${block.people.map(row => `<tr>${row.map(cell => {
+              const bg = cell.text ? cell.color : null;
+              const style = bg ? `background:${bg};color:${textColorForBg(bg)};font-weight:700;border-radius:4px;` : "";
+              return `<td style="${style}">${escapeHtml(cell.text)}</td>`;
+            }).join("")}</tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`).join("");
+  } catch (err) {
+    wrap.innerHTML = `<div class="card"><div class="empty-state">${escapeHtml(err.message)}</div></div>`;
+  }
 }
 
 /* ===================== 등록/수정 모달 ===================== */
