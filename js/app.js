@@ -1243,7 +1243,15 @@ function findSeedForBranch(branch) {
   return ROSTER_SEED_DATA.find(s => s.branch === short) || null;
 }
 
-function renderRosterBranchCard(branch, data) {
+// Firestore는 배열 안에 배열을 직접 저장할 수 없어서, 사람 한 명(행)을 {cells:[...]} 형태로 감싸서 저장합니다.
+function seedToFirestoreShape(seed) {
+  return {
+    years: [...seed.years],
+    people: seed.people.map(row => ({ cells: row.map(c => ({ name: c.name || "", status: c.status || null })) }))
+  };
+}
+
+async function renderRosterBranchCard(branch, data) {
   const card = document.getElementById(`rosterCard_${branch.id}`);
   const isLeader = state.profile.role === "leader";
 
@@ -1256,24 +1264,26 @@ function renderRosterBranchCard(branch, data) {
       </div>`;
     if (isLeader && seed) {
       document.getElementById(`seedBtn_${branch.id}`).onclick = async () => {
-        const newData = { years: [...seed.years], people: seed.people.map(row => row.map(c => ({ ...c }))) };
-        await setDoc(doc(db, "rosterEntries", branch.id), newData);
-        showToast("불러왔습니다.");
-        loadAndRenderRosterBranch(branch);
+        try {
+          await setDoc(doc(db, "rosterEntries", branch.id), seedToFirestoreShape(seed));
+          showToast("불러왔습니다.");
+          loadAndRenderRosterBranch(branch);
+        } catch (err) { alert("불러오는 중 오류: " + err.message); }
       };
     }
     if (isLeader) {
       document.getElementById(`newBtn_${branch.id}`).onclick = async () => {
-        const newData = { years: [], people: [] };
-        await setDoc(doc(db, "rosterEntries", branch.id), newData);
-        loadAndRenderRosterBranch(branch);
+        try {
+          await setDoc(doc(db, "rosterEntries", branch.id), { years: [], people: [] });
+          loadAndRenderRosterBranch(branch);
+        } catch (err) { alert("오류: " + err.message); }
       };
     }
     return;
   }
 
   const years = data.years || [];
-  const people = data.people || [];
+  const people = data.people || []; // [{cells:[{name,status}, ...]}, ...]
   const seed = findSeedForBranch(branch);
 
   let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap;">
@@ -1291,9 +1301,9 @@ function renderRosterBranchCard(branch, data) {
       ${years.map((y, yi) => `<th>${escapeHtml(y)}${isLeader ? ` <button type="button" class="icon-btn danger" data-del-year="${yi}" style="padding:2px 4px;">✕</button>` : ""}</th>`).join("")}
       ${isLeader ? `<th></th>` : ""}
     </tr></thead><tbody>
-      ${people.map((row, pi) => `<tr>
+      ${people.map((person, pi) => `<tr>
         ${years.map((y, yi) => {
-          const cell = row[yi] || { name: "", status: null };
+          const cell = (person.cells && person.cells[yi]) || { name: "", status: null };
           const bg = cell.status ? ROSTER_STATUS_COLOR[cell.status] : null;
           const style = bg ? `background:${bg};color:${textColorForBg(bg)};font-weight:700;border-radius:4px;` : "";
           return `<td style="${style}${isLeader ? "cursor:pointer;" : ""}" ${isLeader ? `data-cell-edit="${pi}_${yi}"` : ""}>${escapeHtml(cell.name || "")}</td>`;
@@ -1310,10 +1320,11 @@ function renderRosterBranchCard(branch, data) {
   if (document.getElementById(`reseedBtn_${branch.id}`)) {
     document.getElementById(`reseedBtn_${branch.id}`).onclick = async () => {
       if (!confirm("지금 표를 지우고 2026년까지의 기존 자료로 덮어쓸까요? (지금까지 직접 수정한 내용이 있다면 사라집니다)")) return;
-      const newData = { years: [...seed.years], people: seed.people.map(row => row.map(c => ({ ...c }))) };
-      await setDoc(doc(db, "rosterEntries", branch.id), newData);
-      showToast("불러왔습니다.");
-      loadAndRenderRosterBranch(branch);
+      try {
+        await setDoc(doc(db, "rosterEntries", branch.id), seedToFirestoreShape(seed));
+        showToast("불러왔습니다.");
+        loadAndRenderRosterBranch(branch);
+      } catch (err) { alert("불러오는 중 오류: " + err.message); }
     };
   }
   if (document.getElementById(`addYearBtn_${branch.id}`)) {
@@ -1323,14 +1334,14 @@ function renderRosterBranchCard(branch, data) {
       data.years = data.years || [];
       data.people = data.people || [];
       data.years.push(label);
-      data.people.forEach(row => row.push({ name: "", status: null }));
+      data.people.forEach(person => { person.cells = person.cells || []; person.cells.push({ name: "", status: null }); });
       saveRosterBranch(branch, data);
     };
   }
   if (document.getElementById(`addPersonBtn_${branch.id}`)) {
     document.getElementById(`addPersonBtn_${branch.id}`).onclick = () => {
       data.people = data.people || [];
-      data.people.push((data.years || []).map(() => ({ name: "", status: null })));
+      data.people.push({ cells: (data.years || []).map(() => ({ name: "", status: null })) });
       saveRosterBranch(branch, data);
     };
   }
@@ -1339,7 +1350,7 @@ function renderRosterBranchCard(branch, data) {
       const yi = parseInt(btn.dataset.delYear, 10);
       if (!confirm("이 연도 열을 삭제할까요?")) return;
       data.years.splice(yi, 1);
-      data.people.forEach(row => row.splice(yi, 1));
+      data.people.forEach(person => person.cells && person.cells.splice(yi, 1));
       saveRosterBranch(branch, data);
     };
   });
@@ -1360,13 +1371,18 @@ function renderRosterBranchCard(branch, data) {
 }
 
 async function saveRosterBranch(branch, data) {
-  await setDoc(doc(db, "rosterEntries", branch.id), data);
-  renderRosterBranchCard(branch, data);
+  try {
+    await setDoc(doc(db, "rosterEntries", branch.id), data);
+    renderRosterBranchCard(branch, data);
+  } catch (err) {
+    alert("저장 중 오류: " + err.message);
+  }
 }
 
 function openRosterCellModal(branch, data, personIdx, yearIdx) {
   const root = document.getElementById("modalRoot");
-  const cell = (data.people[personIdx] && data.people[personIdx][yearIdx]) || { name: "", status: null };
+  const person = data.people[personIdx] || { cells: [] };
+  const cell = person.cells[yearIdx] || { name: "", status: null };
   root.innerHTML = `<div class="modal-bg" id="modalBg">
     <div class="modal">
       <h3>${escapeHtml(branch.name)} · ${escapeHtml(data.years[yearIdx] || "")}</h3>
@@ -1390,7 +1406,8 @@ function openRosterCellModal(branch, data, personIdx, yearIdx) {
     e.preventDefault();
     const name = document.getElementById("rcName").value.trim();
     const status = document.getElementById("rcStatus").value || null;
-    data.people[personIdx][yearIdx] = { name, status };
+    if (!data.people[personIdx].cells) data.people[personIdx].cells = [];
+    data.people[personIdx].cells[yearIdx] = { name, status };
     root.innerHTML = "";
     await saveRosterBranch(branch, data);
   });
