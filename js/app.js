@@ -1305,7 +1305,8 @@ async function renderRosterBranchCard(branch, data) {
         ${years.map((y, yi) => {
           const cell = (person.cells && person.cells[yi]) || { name: "", status: null };
           const bg = cell.status ? ROSTER_STATUS_COLOR[cell.status] : null;
-          const style = bg ? `background:${bg};color:${textColorForBg(bg)};font-weight:700;border-radius:4px;` : "";
+          const textColor = cell.status === "지점이동In" ? "#000" : textColorForBg(bg);
+          const style = bg ? `background:${bg};color:${textColor};font-weight:700;border-radius:4px;` : "";
           return `<td style="${style}${isLeader ? "cursor:pointer;" : ""}" ${isLeader ? `data-cell-edit="${pi}_${yi}"` : ""}>${escapeHtml(cell.name || "")}</td>`;
         }).join("")}
         ${isLeader ? `<td><button type="button" class="icon-btn danger" data-del-row="${pi}">✕</button></td>` : ""}
