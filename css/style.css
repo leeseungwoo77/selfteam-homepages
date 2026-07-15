@@ -152,7 +152,7 @@ a { color: inherit; }
 .nav-subitem:hover { background: rgba(255,255,255,0.06); opacity: 1; }
 .nav-subitem.active { background: rgba(255,255,255,0.14); opacity: 1; color: #fff; }
 
-.sidebar-footer { margin-top: auto; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); }
+.sidebar-footer { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); }
 
 .main { flex: 1; padding: 32px 40px; overflow-y: auto; }
 
