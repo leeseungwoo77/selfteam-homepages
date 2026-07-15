@@ -66,7 +66,7 @@ const SECTIONS = [
       { key:"followUp", label:"후속조치", type:"textarea" }
     ], columns:["date","branchName","memberName"] },
 
-  { key:"performance", label:"지점 성과 지표", group:"성과", color:"blue",
+  { key:"performance", label:"지점 성과 지표", group:"성과·전략", color:"blue",
     collectionName:"performance", scope:"branch", writable:"leader-and-branch",
     desc:"상상플렉스 고객지표 시트를 지점별로 보여줍니다.",
     isBranchSheet:true, hasBranchSubmenu:true,
@@ -80,7 +80,7 @@ const SECTIONS = [
       { key:"memo", label:"메모", type:"textarea" }
     ], columns:["period","branchName","revenue","newRegistrations","renewalRate"] },
 
-  { key:"notice", label:"팀 공지사항", group:"소통", color:"magenta",
+  { key:"notice", label:"팀 공지사항", group:"소통·협업", color:"magenta",
     collectionName:"notices", scope:"team", writable:"leader",
     desc:"팀 전체 공지사항입니다.",
     fields:[
@@ -115,7 +115,7 @@ const SECTIONS = [
     desc:"지점별 인력 이동 현황(잔류/신규입사/이동/퇴사)을 색깔 그대로 보여줍니다.",
     isRosterGrid:true }
 ];
-const GROUP_ORDER = ["일정 · 미팅", "성과", "소통", "자료실"];
+const GROUP_ORDER = ["일정 · 미팅", "성과·전략", "소통·협업", "자료실"];
 const COLOR_HEX = { blue:"var(--blue-bright)", green:"var(--green-bright)", magenta:"var(--magenta-bright)", neutral:"#9CA88F" };
 
 /* ===================== 팀장 일정 - 구글 시트 연동 (OAuth) =====================
@@ -724,7 +724,7 @@ function buildNav() {
   if (state.profile.role === "leader") {
     html += `<div class="nav-group"><div class="nav-group-label">관리</div>
       <div class="nav-item" data-key="admin" style="--nav-color:#9CA88F">
-        <span class="dot" style="background:#9CA88F"></span>지점 · 팀원 관리
+        <span class="nav-label"><span class="dot" style="background:#9CA88F"></span>지점 · 팀원 관리</span>
       </div></div>`;
   }
   nav.innerHTML = html;
