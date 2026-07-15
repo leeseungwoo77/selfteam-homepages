@@ -60,6 +60,9 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
     }
 
+    // 지점 인적 구성 - 팀장만 수정, 로그인한 누구나 조회
+    match /rosterEntries/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
+
     // 지점별 데이터 - 팀장은 전체, 팀원은 자기 담당 지점 데이터만, viewer(예: 대표님)는 전체 열람만
     match /directorMeetings/{id} { allow read: if canViewAll(); allow write: if isLeader(); }
     match /memberMeetings/{id}   { allow read: if isSignedIn() && (canViewAll() || resource.data.branchId == myBranch());

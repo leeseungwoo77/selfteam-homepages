@@ -1176,71 +1176,26 @@ function openOkrModal(section, existing) {
   });
 }
 
-/* ===================== 지점 인적 구성 - 구글 시트 색상 그대로 재현 ===================== */
-const ROSTER_SPREADSHEET_ID = "1TA3ObFLBQGb9dmKlOEL4XxPmE308ifyOPhxzEzAe-I8";
-const ROSTER_SHEET_NAME = "팀원 이력";
+/* ===================== 지점 인적 구성 - 홈페이지에서 직접 관리 ===================== */
 const ROSTER_LEGEND = [
-  { label: "잔류", color: "#0000FF" },
-  { label: "신규 입사", color: "#00FFFF" },
-  { label: "지점 이동 In", color: "#00FF00" },
-  { label: "지점 이동 Out", color: "#FF9900" },
-  { label: "타팀 이동 Out", color: "#FFFF00" },
-  { label: "퇴사", color: "#FF0000" }
+  { key:"잔류", label:"잔류", color:"#0000FF" },
+  { key:"신규입사", label:"신규 입사", color:"#00FFFF" },
+  { key:"지점이동In", label:"지점 이동 In", color:"#00FF00" },
+  { key:"지점이동Out", label:"지점 이동 Out", color:"#FF9900" },
+  { key:"타팀이동Out", label:"타팀 이동 Out", color:"#FFFF00" },
+  { key:"퇴사", label:"퇴사", color:"#FF0000" }
 ];
+const ROSTER_STATUS_COLOR = Object.fromEntries(ROSTER_LEGEND.map(l => [l.key, l.color]));
 
-function bgColorToHex(bg) {
-  if (!bg) return null;
-  const r = Math.round((bg.red || 0) * 255), g = Math.round((bg.green || 0) * 255), b = Math.round((bg.blue || 0) * 255);
-  if (r > 240 && g > 240 && b > 240) return null; // 흰색은 그냥 빈 셀 취급
-  return `#${[r, g, b].map(x => x.toString(16).padStart(2, "0")).join("")}`;
-}
+// 2026년까지의 기존 자료 (엑셀에서 가져온 초기값). 지점별로 "불러오기" 버튼을 한 번 누르면
+// Firestore에 저장되고, 이후로는 전부 홈페이지에서 직접 관리합니다.
+const ROSTER_SEED_DATA = [{"branch": "행당", "years": ["2022년", "2023년", "2024년", "2025년", "2026년"], "people": [[{"name": "윤서연", "status": "잔류"}, {"name": "윤서연", "status": "잔류"}, {"name": "윤서연", "status": "잔류"}, {"name": "윤서연", "status": "잔류"}, {"name": "윤서연", "status": "잔류"}], [{"name": "김선희", "status": "신규입사"}, {"name": "김선희", "status": "잔류"}, {"name": "김선희", "status": "잔류"}, {"name": "김선희", "status": "잔류"}, {"name": "김선희", "status": "잔류"}], [{"name": "조이령", "status": "신규입사"}, {"name": "조이령", "status": "잔류"}, {"name": "조이령", "status": "잔류"}, {"name": "조이령", "status": "잔류"}, {"name": "조이령", "status": "잔류"}], [{"name": "", "status": null}, {"name": "김광수", "status": "신규입사"}, {"name": "김광수", "status": "지점이동Out"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "박승연", "status": "신규입사"}, {"name": "박승연", "status": "퇴사"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "박화영", "status": "지점이동In"}, {"name": "박화영", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "임승호", "status": "지점이동In"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "류채연", "status": "신규입사"}]]}, {"branch": "전농", "years": ["2022년", "2023년", "2024년", "2025년", "2026년"], "people": [[{"name": "", "status": null}, {"name": "한성호", "status": "잔류"}, {"name": "한성호", "status": "잔류"}, {"name": "한성호", "status": "타팀이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "김지나", "status": "지점이동In"}, {"name": "김지나", "status": "잔류"}, {"name": "김지나", "status": "잔류"}, {"name": "김지나", "status": "잔류"}], [{"name": "", "status": null}, {"name": "박화영", "status": "잔류"}, {"name": "박화영", "status": "잔류"}, {"name": "박화영", "status": "지점이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "김성은", "status": "잔류"}, {"name": "김성은", "status": "잔류"}, {"name": "김성은", "status": "잔류"}, {"name": "김성은", "status": "잔류"}], [{"name": "", "status": null}, {"name": "한승희", "status": "잔류"}, {"name": "한승희", "status": "잔류"}, {"name": "한승희", "status": "퇴사"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "강승협", "status": "지점이동In"}, {"name": "강승협", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "임소연", "status": "지점이동In"}, {"name": "임소연", "status": "퇴사"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "윤재원", "status": "신규입사"}]]}, {"branch": "돈암", "years": ["2022년", "2023년", "2024년", "2025년", "2026년"], "people": [[{"name": "", "status": null}, {"name": "이유민", "status": "잔류"}, {"name": "이유민", "status": "잔류"}, {"name": "이유민", "status": "잔류"}, {"name": "이유민", "status": "잔류"}], [{"name": "", "status": null}, {"name": "김지영", "status": "잔류"}, {"name": "김지영", "status": "타팀이동Out"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "임승호", "status": "지점이동In"}, {"name": "임승호", "status": "지점이동Out"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "조누리", "status": "잔류"}, {"name": "조누리", "status": "잔류"}, {"name": "조누리", "status": "퇴사"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "이영호", "status": "잔류"}, {"name": "이영호", "status": "잔류"}, {"name": "이영호", "status": "잔류"}, {"name": "이영호", "status": "잔류"}], [{"name": "", "status": null}, {"name": "황희선", "status": "신규입사"}, {"name": "황희선", "status": "잔류"}, {"name": "황희선", "status": "잔류"}, {"name": "황희선", "status": "잔류"}], [{"name": "", "status": null}, {"name": "김태목", "status": "신규입사"}, {"name": "김태목", "status": "퇴사"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "강승협", "status": "신규입사"}, {"name": "강승협", "status": "지점이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "김광수", "status": "지점이동In"}, {"name": "김광수", "status": "잔류"}, {"name": "김광수", "status": "타팀이동Out"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "김진혁", "status": "신규입사"}, {"name": "김진혁", "status": "잔류"}, {"name": "김진혁", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "송보경", "status": "잔류"}, {"name": "송보경", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "이정은", "status": "지점이동In"}, {"name": "이정은", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "홍지연", "status": "신규입사"}]]}, {"branch": "별내", "years": ["2022년", "2023년", "2024년", "2025년", "2026년"], "people": [[{"name": "", "status": null}, {"name": "박진희", "status": "잔류"}, {"name": "박진희", "status": "퇴사"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "이하나", "status": "잔류"}, {"name": "이하나", "status": "타팀이동Out"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "신축복", "status": "퇴사"}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "은혜리", "status": "잔류"}, {"name": "은혜리", "status": "잔류"}, {"name": "은혜리", "status": "타팀이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "이혜진", "status": "퇴사"}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "임승호", "status": "지점이동In"}, {"name": "임승호", "status": "잔류"}, {"name": "임승호", "status": "타팀이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "최윤호", "status": "신규입사"}, {"name": "최윤호", "status": "지점이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "서지은", "status": "신규입사"}, {"name": "서지은", "status": "잔류"}, {"name": "서지은", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "강건우", "status": "퇴사"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "김영상", "status": "신규입사"}, {"name": "김영상", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "박은별", "status": "지점이동In"}, {"name": "박은별", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "이유진", "status": "신규입사"}, {"name": "이유진", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "이준희", "status": "신규입사"}]]}, {"branch": "다산", "years": ["2022년", "2023년", "2024년", "2025년", "2026년"], "people": [[{"name": "", "status": null}, {"name": "", "status": null}, {"name": "전광수", "status": "지점이동In"}, {"name": "전광수", "status": "잔류"}, {"name": "전광수", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "허태강", "status": "퇴사"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "임소연", "status": "신규입사"}, {"name": "임소연", "status": "지점이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "정지은", "status": "지점이동In"}, {"name": "정지은", "status": "잔류"}, {"name": "정지은", "status": "퇴사"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "김상현", "status": "신규입사"}, {"name": "김상현", "status": "잔류"}]]}]
+;
+
 function textColorForBg(hex) {
   if (!hex) return "inherit";
   const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6 ? "#222" : "#fff";
-}
-
-async function fetchRosterRowData() {
-  if (!googleAccessToken) await requestGoogleAuth();
-  const fields = encodeURIComponent("sheets.data.rowData.values(formattedValue,effectiveFormat.backgroundColor)");
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${ROSTER_SPREADSHEET_ID}?ranges=${encodeURIComponent(ROSTER_SHEET_NAME)}&fields=${fields}`;
-  let res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
-  if (res.status === 401) {
-    googleAccessToken = null;
-    await requestGoogleAuth();
-    res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
-  }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body?.error?.message || `시트를 불러오지 못했습니다 (${res.status})`);
-  }
-  const data = await res.json();
-  return data.sheets?.[0]?.data?.[0]?.rowData || [];
-}
-
-function parseRosterBlocks(rowData) {
-  const blocks = [];
-  let current = null;
-  rowData.forEach(row => {
-    const cells = row.values || [];
-    const colA = cells[0]?.formattedValue || "";
-    if (colA === "구분") {
-      const years = cells.slice(1).map(c => c?.formattedValue).filter(Boolean);
-      current = { branch: "", years, people: [] };
-      blocks.push(current);
-      return;
-    }
-    if (!current) return;
-    const dataCells = cells.slice(1, 1 + current.years.length).map(c => ({
-      text: c?.formattedValue || "",
-      color: bgColorToHex(c?.effectiveFormat?.backgroundColor)
-    }));
-    const rowHasContent = colA || dataCells.some(c => c.text);
-    if (!rowHasContent) { current = null; return; }
-    if (!current.branch && colA) current.branch = colA;
-    current.people.push(dataCells);
-  });
-  return blocks.filter(b => b.branch);
 }
 
 function renderRosterLegend() {
@@ -1259,46 +1214,173 @@ async function renderRosterGrid(section) {
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
         <p>${section.desc}</p>
       </div>
-      <div style="display:flex;gap:8px;">
-        <a href="https://docs.google.com/spreadsheets/d/${ROSTER_SPREADSHEET_ID}/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">원본 시트 열기</a>
-        <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
-      </div>
     </div>
     <div class="card" id="rosterLegend" style="padding:14px 22px;"></div>
-    <div id="rosterWrap">${googleAccessToken ? "" : '<div class="card"><div class="empty-state">위 "구글 계정으로 연결" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요.</div></div>'}</div>`;
-
+    <div id="rosterWrap">불러오는 중...</div>`;
   renderRosterLegend();
 
-  document.getElementById("googleAuthBtn").onclick = async () => {
-    try { await requestGoogleAuth(); showToast("구글 계정이 연결되었습니다."); renderSection(section.key); }
-    catch (err) { alert(err.message); }
-  };
-
-  if (!googleAccessToken) return;
+  const branchesSorted = [...state.branches].sort((a, b) => a.name.localeCompare(b.name, "ko"));
   const wrap = document.getElementById("rosterWrap");
-  wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>불러오는 중...</div></div>`;
-  try {
-    const rowData = await fetchRosterRowData();
-    const blocks = parseRosterBlocks(rowData);
-    if (!blocks.length) { wrap.innerHTML = `<div class="card"><div class="empty-state">표시할 데이터를 찾지 못했습니다.</div></div>`; return; }
+  if (!branchesSorted.length) { wrap.innerHTML = `<div class="card"><div class="empty-state">등록된 지점이 없습니다.</div></div>`; return; }
 
-    wrap.innerHTML = blocks.map(block => `
-      <div class="card" style="overflow:auto;">
-        <h2 style="margin-bottom:12px;">${escapeHtml(block.branch)}</h2>
-        <table class="table-compact" style="width:max-content;min-width:100%;">
-          <thead><tr>${block.years.map(y => `<th>${escapeHtml(y)}</th>`).join("")}</tr></thead>
-          <tbody>
-            ${block.people.map(row => `<tr>${row.map(cell => {
-              const bg = cell.text ? cell.color : null;
-              const style = bg ? `background:${bg};color:${textColorForBg(bg)};font-weight:700;border-radius:4px;` : "";
-              return `<td style="${style}">${escapeHtml(cell.text)}</td>`;
-            }).join("")}</tr>`).join("")}
-          </tbody>
-        </table>
-      </div>`).join("");
-  } catch (err) {
-    wrap.innerHTML = `<div class="card"><div class="empty-state">${escapeHtml(err.message)}</div></div>`;
+  wrap.innerHTML = branchesSorted.map(b => `<div class="card" id="rosterCard_${b.id}" style="overflow:auto;"><div class="empty-state">불러오는 중...</div></div>`).join("");
+  for (const b of branchesSorted) {
+    await loadAndRenderRosterBranch(b);
   }
+}
+
+async function loadAndRenderRosterBranch(branch) {
+  let data = null;
+  try {
+    const snap = await getDoc(doc(db, "rosterEntries", branch.id));
+    if (snap.exists()) data = snap.data();
+  } catch (err) { /* 문서 없음 */ }
+  renderRosterBranchCard(branch, data);
+}
+
+function findSeedForBranch(branch) {
+  const short = stripBranchSuffix(branch.name);
+  return ROSTER_SEED_DATA.find(s => s.branch === short) || null;
+}
+
+function renderRosterBranchCard(branch, data) {
+  const card = document.getElementById(`rosterCard_${branch.id}`);
+  const isLeader = state.profile.role === "leader";
+
+  if (!data) {
+    const seed = findSeedForBranch(branch);
+    card.innerHTML = `<h2 style="margin-bottom:10px;">${escapeHtml(branch.name)}</h2>
+      <div class="empty-state">아직 등록된 인력 이력이 없습니다.
+      ${isLeader && seed ? `<br><button class="btn small" id="seedBtn_${branch.id}" style="margin-top:10px;">2026년까지 기존 자료 불러오기</button>` : ""}
+      ${isLeader ? `<br><button class="btn small secondary" id="newBtn_${branch.id}" style="margin-top:10px;">빈 표로 새로 시작</button>` : ""}
+      </div>`;
+    if (isLeader && seed) {
+      document.getElementById(`seedBtn_${branch.id}`).onclick = async () => {
+        const newData = { years: [...seed.years], people: seed.people.map(row => row.map(c => ({ ...c }))) };
+        await setDoc(doc(db, "rosterEntries", branch.id), newData);
+        showToast("불러왔습니다.");
+        loadAndRenderRosterBranch(branch);
+      };
+    }
+    if (isLeader) {
+      document.getElementById(`newBtn_${branch.id}`).onclick = async () => {
+        const newData = { years: [], people: [] };
+        await setDoc(doc(db, "rosterEntries", branch.id), newData);
+        loadAndRenderRosterBranch(branch);
+      };
+    }
+    return;
+  }
+
+  const years = data.years || [];
+  const people = data.people || [];
+
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <h2 style="margin:0;">${escapeHtml(branch.name)}</h2>
+    ${isLeader ? `<button class="btn small" id="addYearBtn_${branch.id}">+ 연도 추가</button>` : ""}
+  </div>`;
+
+  if (!years.length) {
+    html += `<div class="empty-state">등록된 연도가 없습니다.</div>`;
+  } else {
+    html += `<table class="table-compact" style="width:max-content;min-width:100%;"><thead><tr>
+      ${years.map((y, yi) => `<th>${escapeHtml(y)}${isLeader ? ` <button type="button" class="icon-btn danger" data-del-year="${yi}" style="padding:2px 4px;">✕</button>` : ""}</th>`).join("")}
+      ${isLeader ? `<th></th>` : ""}
+    </tr></thead><tbody>
+      ${people.map((row, pi) => `<tr>
+        ${years.map((y, yi) => {
+          const cell = row[yi] || { name: "", status: null };
+          const bg = cell.status ? ROSTER_STATUS_COLOR[cell.status] : null;
+          const style = bg ? `background:${bg};color:${textColorForBg(bg)};font-weight:700;border-radius:4px;` : "";
+          return `<td style="${style}${isLeader ? "cursor:pointer;" : ""}" ${isLeader ? `data-cell-edit="${pi}_${yi}"` : ""}>${escapeHtml(cell.name || "")}</td>`;
+        }).join("")}
+        ${isLeader ? `<td><button type="button" class="icon-btn danger" data-del-row="${pi}">✕</button></td>` : ""}
+      </tr>`).join("")}
+    </tbody></table>`;
+  }
+  if (isLeader) html += `<button class="btn small secondary" id="addPersonBtn_${branch.id}" style="margin-top:10px;">+ 인원 추가</button>`;
+
+  card.innerHTML = html;
+  if (!isLeader) return;
+
+  if (document.getElementById(`addYearBtn_${branch.id}`)) {
+    document.getElementById(`addYearBtn_${branch.id}`).onclick = () => {
+      const label = prompt("추가할 연도 이름을 입력하세요 (예: 2027년)");
+      if (!label) return;
+      data.years = data.years || [];
+      data.people = data.people || [];
+      data.years.push(label);
+      data.people.forEach(row => row.push({ name: "", status: null }));
+      saveRosterBranch(branch, data);
+    };
+  }
+  if (document.getElementById(`addPersonBtn_${branch.id}`)) {
+    document.getElementById(`addPersonBtn_${branch.id}`).onclick = () => {
+      data.people = data.people || [];
+      data.people.push((data.years || []).map(() => ({ name: "", status: null })));
+      saveRosterBranch(branch, data);
+    };
+  }
+  card.querySelectorAll("[data-del-year]").forEach(btn => {
+    btn.onclick = () => {
+      const yi = parseInt(btn.dataset.delYear, 10);
+      if (!confirm("이 연도 열을 삭제할까요?")) return;
+      data.years.splice(yi, 1);
+      data.people.forEach(row => row.splice(yi, 1));
+      saveRosterBranch(branch, data);
+    };
+  });
+  card.querySelectorAll("[data-del-row]").forEach(btn => {
+    btn.onclick = () => {
+      const pi = parseInt(btn.dataset.delRow, 10);
+      if (!confirm("이 사람 행을 삭제할까요?")) return;
+      data.people.splice(pi, 1);
+      saveRosterBranch(branch, data);
+    };
+  });
+  card.querySelectorAll("[data-cell-edit]").forEach(td => {
+    td.onclick = () => {
+      const [pi, yi] = td.dataset.cellEdit.split("_").map(Number);
+      openRosterCellModal(branch, data, pi, yi);
+    };
+  });
+}
+
+async function saveRosterBranch(branch, data) {
+  await setDoc(doc(db, "rosterEntries", branch.id), data);
+  renderRosterBranchCard(branch, data);
+}
+
+function openRosterCellModal(branch, data, personIdx, yearIdx) {
+  const root = document.getElementById("modalRoot");
+  const cell = (data.people[personIdx] && data.people[personIdx][yearIdx]) || { name: "", status: null };
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>${escapeHtml(branch.name)} · ${escapeHtml(data.years[yearIdx] || "")}</h3>
+      <form id="rosterCellForm">
+        <div class="field"><label>이름</label><input type="text" id="rcName" value="${escapeHtml(cell.name || "")}"></div>
+        <div class="field"><label>상태</label>
+          <select id="rcStatus">
+            <option value="">없음(빈 칸)</option>
+            ${ROSTER_LEGEND.map(l => `<option value="${l.key}" ${cell.status === l.key ? "selected" : ""}>${escapeHtml(l.label)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="grid-2" style="margin-top:10px;">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="submit" class="btn">저장</button>
+        </div>
+      </form>
+    </div></div>`;
+  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  document.getElementById("rosterCellForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("rcName").value.trim();
+    const status = document.getElementById("rcStatus").value || null;
+    data.people[personIdx][yearIdx] = { name, status };
+    root.innerHTML = "";
+    await saveRosterBranch(branch, data);
+  });
 }
 
 /* ===================== 등록/수정 모달 ===================== */
