@@ -183,6 +183,19 @@ const scheduleViewState = { year: new Date().getFullYear(), month: new Date().ge
 
 function scheduleRowKey(kind) { return kind; } // "location" | "note_에듀본사" | "time_10:00" 등
 
+function findAdjacentCell(td, direction) {
+  const tr = td.parentElement;
+  const colIndex = td.cellIndex;
+  if (direction === "up" || direction === "down") {
+    const targetRow = direction === "up" ? tr.previousElementSibling : tr.nextElementSibling;
+    if (!targetRow) return null;
+    const cell = targetRow.cells[colIndex];
+    return cell && cell.classList.contains("sched-cell") ? cell : null;
+  }
+  const cell = direction === "left" ? td.previousElementSibling : td.nextElementSibling;
+  return cell && cell.classList.contains("sched-cell") ? cell : null;
+}
+
 async function renderMonthlySchedule(section) {
   const main = document.getElementById("mainContent");
   const canEdit = canWriteSection(section);
@@ -223,8 +236,8 @@ async function renderMonthlySchedule(section) {
   const dates = [];
   for (let d = 1; d <= nDays; d++) dates.push(d);
 
-  const cellBase = "white-space:nowrap;padding:5px 10px;min-width:80px;";
-  const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;";
+  const cellBase = "white-space:nowrap;padding:5px 10px;min-width:80px;text-align:center;border-right:1px solid var(--border);";
+  const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;padding:5px 10px;border-right:1px solid var(--border);";
 
   function getCellValue(dateStr, rowKey) {
     const entry = byDate[dateStr];
@@ -243,11 +256,11 @@ async function renderMonthlySchedule(section) {
 
   let html = `<table class="table-compact" style="width:max-content;"><thead>
     <tr>
-      <th style="position:sticky;left:0;top:0;background:#F4FAEF;z-index:3;">날짜</th>
+      <th style="position:sticky;left:0;top:0;background:#F4FAEF;z-index:3;border-right:1px solid var(--border);">날짜</th>
       ${dates.map(d => {
         const wd = weekdayLabel(year, month, d);
         const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
-        return `<th style="position:sticky;top:0;background:#F4FAEF;z-index:2;color:${wdColor};">${month}.${pad2(d)}(${wd})</th>`;
+        return `<th style="position:sticky;top:0;background:#F4FAEF;z-index:2;color:${wdColor};border-right:1px solid var(--border);">${month}.${pad2(d)}(${wd})</th>`;
       }).join("")}
     </tr>
   </thead><tbody>`;
@@ -278,7 +291,12 @@ async function renderMonthlySchedule(section) {
   if (canEdit) {
     document.querySelectorAll(".sched-cell").forEach(td => {
       td.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); td.blur(); }
+        if (e.key === "Enter") { e.preventDefault(); td.blur(); return; }
+        const arrowMap = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+        if (arrowMap[e.key]) {
+          const target = findAdjacentCell(td, arrowMap[e.key]);
+          if (target) { e.preventDefault(); target.focus(); }
+        }
       });
       td.addEventListener("blur", async () => {
         const dateStr = td.dataset.date;
