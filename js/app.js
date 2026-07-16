@@ -15,15 +15,9 @@ import {
 =========================================================== */
 const SECTIONS = [
   { key:"schedule", label:"팀장 일정", group:"일정 · 미팅", color:"green",
-    collectionName:"schedules", scope:"team", writable:"leader",
-    desc:"구글 시트에 기록된 팀장 일정을 월별로 보여줍니다.",
-    isScheduleSheet:true,
-    fields:[
-      { key:"date", label:"날짜", type:"date" },
-      { key:"time", label:"시간", type:"time" },
-      { key:"title", label:"일정 제목", type:"text" },
-      { key:"memo", label:"메모", type:"textarea" }
-    ], columns:["date","time","title"] },
+    collectionName:"scheduleEntries", scope:"team", writable:"leader",
+    desc:"팀장 일정을 월 단위로 직접 입력하고 관리합니다.",
+    isMonthlySchedule:true },
 
   { key:"teamMeeting", label:"팀 회의 일지", group:"일정 · 미팅", color:"green",
     collectionName:"teamMeetings", scope:"team", writable:"all",
@@ -67,18 +61,8 @@ const SECTIONS = [
     ], columns:["date","branchName","memberName"] },
 
   { key:"performance", label:"지점 성과 지표", group:"성과·전략", color:"blue",
-    collectionName:"performance", scope:"branch", writable:"leader-and-branch",
-    desc:"상상플렉스 고객지표 시트를 지점별로 보여줍니다.",
-    isBranchSheet:true, hasBranchSubmenu:true,
-    fields:[
-      { key:"period", label:"기간 (예: 2026-07)", type:"text" },
-      { key:"branchId", label:"지점", type:"branchSelect" },
-      { key:"revenue", label:"매출(만원)", type:"number" },
-      { key:"newRegistrations", label:"신규 등록 수", type:"number" },
-      { key:"renewalRate", label:"재등록률(%)", type:"number" },
-      { key:"consultationConversion", label:"상담 전환율(%)", type:"number" },
-      { key:"memo", label:"메모", type:"textarea" }
-    ], columns:["period","branchName","revenue","newRegistrations","renewalRate"] },
+    desc:"손익계산서 · 인사평가 등 평가지표 시트를 그대로 보여줍니다.",
+    isEvalSheet:true },
 
   { key:"notice", label:"팀 공지사항", group:"소통·협업", color:"magenta",
     collectionName:"notices", scope:"team", writable:"leader",
@@ -123,8 +107,6 @@ const COLOR_HEX = { blue:"var(--blue-bright)", green:"var(--green-bright)", mage
    Sheets API로 읽어옵니다. 시트 하나(연도별 탭)에 그 해의 모든 날짜가
    열로 쭉 이어져 있고, 1행의 "MM. DD(요일)" 텍스트에서 월을 읽어 필터링합니다.
 =========================================================== */
-const SPREADSHEET_ID = "1pH_H7JJhT_1rMUyO05FSbHJeYuHUWoZ2gRBw8XWcea0";
-const PERFORMANCE_SPREADSHEET_ID = "1uequoelbdG3zLzo-FgqbDsPIlb7NGFIasS_82ZzE6iA";
 const GOOGLE_CLIENT_ID = "708745145673-j0ljnhqsl7gg0djq5p9j7uop040thqbe.apps.googleusercontent.com";
 const GOOGLE_SCOPES = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.readonly";
 const LOCATION_COLORS = {
@@ -182,163 +164,148 @@ async function fetchSheetValues(spreadsheetId, sheetName) {
   return data.values || [];
 }
 
-function parseMonthFromHeader(str) {
-  const m = String(str).match(/^(\d{1,2})\s*\.\s*(\d{1,2})/);
-  return m ? parseInt(m[1], 10) : null;
+/* ===================== 팀장 일정 - 홈페이지에서 직접 입력 (월 단위) ===================== */
+function pad2(n) { return String(n).padStart(2, "0"); }
+function ymd(y, m, d) { return `${y}-${pad2(m)}-${pad2(d)}`; }
+function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
+function weekdayLabel(y, m, d) {
+  return ["일","월","화","수","목","금","토"][new Date(y, m - 1, d).getDay()];
 }
 
-async function renderScheduleSheet(section) {
+const scheduleViewState = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+
+async function renderMonthlySchedule(section) {
   const main = document.getElementById("mainContent");
+  const canEdit = canWriteSection(section);
   main.innerHTML = `<div class="page-header">
       <div>
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
         <p>${section.desc}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
-        <a href="https://docs.google.com/spreadsheets/d/1pH_H7JJhT_1rMUyO05FSbHJeYuHUWoZ2gRBw8XWcea0/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">원본 시트 열기</a>
-        <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
-        <select id="yearSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
-        <select id="monthSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
+        <button class="icon-btn" id="prevMonthBtn" style="font-size:18px;">‹</button>
+        <span id="monthLabel" style="font-weight:800;font-size:15px;min-width:110px;text-align:center;"></span>
+        <button class="icon-btn" id="nextMonthBtn" style="font-size:18px;">›</button>
       </div>
     </div>
-    ${state.profile.role === "leader" ? `
-    <div class="card" id="sheetAdminCard">
-      <h2>연도 탭 등록/관리</h2>
-      <form id="sheetAddForm" class="grid-3" style="align-items:end;">
-        <div class="field" style="margin:0;"><label>표시 이름 (예: 2026년)</label><input type="text" id="newSheetLabel" required></div>
-        <div class="field" style="margin:0;"><label>구글 시트 탭 이름</label><input type="text" id="newSheetGid" placeholder="예: 2026년" required></div>
-        <button class="btn" type="submit">추가</button>
-      </form>
-      <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">시트 아래쪽 탭에 표시된 이름을 그대로 입력하세요 (예: 2026년).</p>
-      <div id="sheetList" style="margin-top:14px;"></div>
-    </div>` : ""}
-    <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="sheetTableWrap">${googleAccessToken ? "불러오는 중..." : "오른쪽 위 \"구글 계정으로 연결\" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요."}</div></div>`;
+    <div id="scheduleCalendar">불러오는 중...</div>`;
 
-  document.getElementById("googleAuthBtn").onclick = async () => {
-    try {
-      await requestGoogleAuth();
-      showToast("구글 계정이 연결되었습니다.");
-      renderScheduleSheet(section);
-    } catch (err) {
-      alert(err.message);
-    }
+  document.getElementById("prevMonthBtn").onclick = () => {
+    scheduleViewState.month--;
+    if (scheduleViewState.month < 1) { scheduleViewState.month = 12; scheduleViewState.year--; }
+    renderMonthlySchedule(section);
   };
+  document.getElementById("nextMonthBtn").onclick = () => {
+    scheduleViewState.month++;
+    if (scheduleViewState.month > 12) { scheduleViewState.month = 1; scheduleViewState.year++; }
+    renderMonthlySchedule(section);
+  };
+  document.getElementById("monthLabel").textContent = `${scheduleViewState.year}년 ${scheduleViewState.month}월`;
 
-  const yearsSnap = await getDocs(collection(db, "scheduleSheets"));
-  const years = yearsSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
+  const { year, month } = scheduleViewState;
+  const start = ymd(year, month, 1);
+  const end = ymd(year, month, daysInMonth(year, month));
+  const q = query(collection(db, "scheduleEntries"), where("date", ">=", start), where("date", "<=", end));
+  const snap = await getDocs(q);
+  const byDate = {};
+  snap.docs.forEach(d => { byDate[d.id] = d.data(); });
 
-  const yearSelect = document.getElementById("yearSelect");
-  const monthSelect = document.getElementById("monthSelect");
-  const tableWrap = document.getElementById("sheetTableWrap");
+  const wrap = document.getElementById("scheduleCalendar");
+  const nDays = daysInMonth(year, month);
+  let html = "";
+  for (let d = 1; d <= nDays; d++) {
+    const dateStr = ymd(year, month, d);
+    const wd = weekdayLabel(year, month, d);
+    const entry = byDate[dateStr] || { location: "", items: [] };
+    const items = entry.items || [];
+    const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
+    const locColor = entry.location ? matchLocationColor(entry.location) : null;
 
-  if (!years.length) {
-    yearSelect.innerHTML = `<option value="">등록된 연도가 없습니다</option>`;
-    monthSelect.innerHTML = "";
-    if (googleAccessToken) tableWrap.innerHTML = `<div class="empty-state"><div class="shape"></div>등록된 연도가 없습니다. ${state.profile.role === "leader" ? "위에서 연도를 먼저 등록해주세요." : "팀장에게 문의해주세요."}</div>`;
-  } else {
-    yearSelect.innerHTML = years.map(y => `<option value="${escapeHtml(y.gid)}">${escapeHtml(y.label)}</option>`).join("");
-    yearSelect.onchange = () => loadYearData(yearSelect.value);
-    if (googleAccessToken) await loadYearData(years[years.length - 1].gid);
+    html += `<div class="card" style="padding:14px 20px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <div style="min-width:70px;font-weight:800;color:${wdColor};">${month}.${pad2(d)}(${wd})</div>
+        ${entry.location ? `<span style="padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;${locColor ? `background:${locColor};color:#fff;` : "background:var(--border);"}">${escapeHtml(entry.location)}</span>` : ""}
+        <div style="flex:1;font-size:13.5px;color:var(--text-main);display:flex;flex-wrap:wrap;gap:6px 16px;">
+          ${items.length ? items.map(it => `<span><strong>${escapeHtml(it.time || "")}</strong> ${escapeHtml(it.title || "")}</span>`).join("") : (canEdit ? `<span style="color:var(--text-muted);">일정 없음</span>` : "")}
+        </div>
+        ${canEdit ? `<button class="icon-btn" data-edit-day="${dateStr}">수정</button>` : ""}
+      </div>
+    </div>`;
   }
-
-  if (state.profile.role === "leader") {
-    renderSheetList(years);
-    document.getElementById("sheetAddForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const label = document.getElementById("newSheetLabel").value.trim();
-      const gid = document.getElementById("newSheetGid").value.trim();
-      if (!label || !gid) return;
-      await addDoc(collection(db, "scheduleSheets"), { label, gid, createdAt: new Date().toISOString() });
-      showToast("연도가 등록되었습니다.");
-      renderScheduleSheet(section);
-    });
-  }
-}
-
-let currentSheetRows = null;
-
-async function loadYearData(sheetName) {
-  const tableWrap = document.getElementById("sheetTableWrap");
-  const monthSelect = document.getElementById("monthSelect");
-  if (!sheetName) { tableWrap.innerHTML = `<div class="empty-state">표시할 연도를 선택해주세요.</div>`; return; }
-  tableWrap.innerHTML = `<div class="empty-state"><div class="shape"></div>불러오는 중...</div>`;
-  try {
-    const rows = await fetchSheetValues(SPREADSHEET_ID, sheetName);
-    if (!rows.length) { tableWrap.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
-    currentSheetRows = rows;
-
-    // 1행에서 등장하는 월 목록 추출 (등장 순서 유지, 중복 제거)
-    const header = rows[0];
-    const monthsSeen = [];
-    for (let ci = 1; ci < header.length; ci++) {
-      const mo = parseMonthFromHeader(header[ci]);
-      if (mo && !monthsSeen.includes(mo)) monthsSeen.push(mo);
-    }
-    if (!monthsSeen.length) {
-      tableWrap.innerHTML = `<div class="empty-state">1행에서 날짜(월) 형식을 인식하지 못했습니다. (예상 형식: 03. 02(월))</div>`;
-      monthSelect.innerHTML = "";
-      return;
-    }
-    monthSelect.innerHTML = monthsSeen.map(m => `<option value="${m}">${m}월</option>`).join("");
-    const thisMonth = new Date().getMonth() + 1;
-    monthSelect.value = monthsSeen.includes(thisMonth) ? String(thisMonth) : String(monthsSeen[0]);
-    monthSelect.onchange = () => renderFilteredMonthTable(parseInt(monthSelect.value, 10));
-    renderFilteredMonthTable(parseInt(monthSelect.value, 10));
-  } catch (err) {
-    tableWrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
-  }
-}
-
-function renderFilteredMonthTable(month) {
-  const wrap = document.getElementById("sheetTableWrap");
-  if (!currentSheetRows) return;
-  const header = currentSheetRows[0];
-  const colIndexes = [0]; // 0번 열(행 라벨)은 항상 포함
-  for (let ci = 1; ci < header.length; ci++) {
-    if (parseMonthFromHeader(header[ci]) === month) colIndexes.push(ci);
-  }
-  if (colIndexes.length <= 1) { wrap.innerHTML = `<div class="empty-state">${month}월 데이터가 없습니다.</div>`; return; }
-
-  let html = `<table style="min-width:900px;"><thead><tr>`;
-  colIndexes.forEach(ci => {
-    const str = String(header[ci] ?? "");
-    let style = "position:sticky;top:0;background:#F4FAEF;";
-    if (str.includes("(토)")) style += "color:var(--blue-deep);";
-    if (str.includes("(일)")) style += "color:var(--danger);";
-    html += `<th style="${style}">${escapeHtml(str)}</th>`;
-  });
-  html += `</tr></thead><tbody>`;
-  for (let ri = 1; ri < currentSheetRows.length; ri++) {
-    const row = currentSheetRows[ri];
-    html += `<tr>`;
-    colIndexes.forEach((ci, idx) => {
-      const str = String(row[ci] ?? "");
-      const isRowLabel = idx === 0;
-      let style = isRowLabel ? "font-weight:700;white-space:nowrap;position:sticky;left:0;background:#fff;" : "white-space:nowrap;";
-      if (matchLocationColor(str)) style += `background:${matchLocationColor(str)};color:#fff;font-weight:700;border-radius:4px;`;
-      html += `<td style="${style}">${escapeHtml(str)}</td>`;
-    });
-    html += `</tr>`;
-  }
-  html += `</tbody></table>`;
   wrap.innerHTML = html;
+
+  if (canEdit) {
+    wrap.querySelectorAll("[data-edit-day]").forEach(btn => {
+      btn.onclick = () => openScheduleDayModal(section, btn.dataset.editDay, byDate[btn.dataset.editDay]);
+    });
+  }
 }
 
-function renderSheetList(years) {
-  const wrap = document.getElementById("sheetList");
-  if (!years.length) { wrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 등록된 연도가 없습니다.</p>`; return; }
-  wrap.innerHTML = `<table><thead><tr><th>표시 이름</th><th>탭 이름</th><th></th></tr></thead><tbody>
-    ${years.map(y => `<tr><td>${escapeHtml(y.label)}</td><td class="mono">${escapeHtml(y.gid)}</td>
-      <td class="actions"><button class="icon-btn danger" data-sid="${y.id}">삭제</button></td></tr>`).join("")}
-  </tbody></table>`;
-  wrap.querySelectorAll("[data-sid]").forEach(btn => {
-    btn.onclick = async () => {
-      if (!confirm("이 연도 등록을 삭제할까요? (구글 시트 자체는 삭제되지 않습니다)")) return;
-      await deleteDoc(doc(db, "scheduleSheets", btn.dataset.sid));
-      showToast("삭제되었습니다.");
-      renderScheduleSheet(getSectionByKey("schedule"));
+function openScheduleDayModal(section, dateStr, existing) {
+  const root = document.getElementById("modalRoot");
+  const state_ = { location: (existing && existing.location) || "", items: (existing && existing.items) ? existing.items.map(i => ({ ...i })) : [] };
+
+  function render() {
+    root.innerHTML = `<div class="modal-bg" id="modalBg">
+      <div class="modal">
+        <h3>${dateStr} 일정</h3>
+        <div class="field"><label>근무 장소</label><input type="text" id="dayLocation" placeholder="예: 상상, 상상/전능" value="${escapeHtml(state_.location)}"></div>
+        <div class="field"><label>일정 목록</label>
+          <div id="dayItems"></div>
+          <button type="button" class="btn small secondary" id="addItemBtn" style="margin-top:6px;">+ 일정 추가</button>
+        </div>
+        <div class="grid-2" style="margin-top:14px;">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="button" class="btn" id="saveDayBtn">저장</button>
+        </div>
+      </div></div>`;
+    renderItems();
+    document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+    document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+    document.getElementById("addItemBtn").onclick = () => { state_.items.push({ time: "", title: "" }); renderItems(); };
+    document.getElementById("saveDayBtn").onclick = async () => {
+      state_.location = document.getElementById("dayLocation").value.trim();
+      const cleanItems = state_.items
+        .map((it, i) => ({
+          time: document.getElementById(`itemTime_${i}`)?.value.trim() || "",
+          title: document.getElementById(`itemTitle_${i}`)?.value.trim() || ""
+        }))
+        .filter(it => it.time || it.title);
+      try {
+        await setDoc(doc(db, "scheduleEntries", dateStr), { date: dateStr, location: state_.location, items: cleanItems });
+        root.innerHTML = "";
+        showToast("저장되었습니다.");
+        renderSection(section.key);
+      } catch (err) {
+        alert("저장 중 오류: " + err.message);
+      }
     };
-  });
+  }
+
+  function renderItems() {
+    const wrap = document.getElementById("dayItems");
+    wrap.innerHTML = state_.items.map((it, i) => `
+      <div class="grid-2" style="margin-bottom:6px;">
+        <input type="time" id="itemTime_${i}" value="${escapeHtml(it.time || "")}">
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="itemTitle_${i}" placeholder="일정 제목" value="${escapeHtml(it.title || "")}" style="flex:1;">
+          <button type="button" class="icon-btn danger" data-rm="${i}">✕</button>
+        </div>
+      </div>`).join("") || `<p style="font-size:12px;color:var(--text-muted);">등록된 일정이 없습니다.</p>`;
+    wrap.querySelectorAll("[data-rm]").forEach(btn => {
+      btn.onclick = () => {
+        // 입력 중인 값 보존 후 삭제
+        state_.items = state_.items.map((it, i) => ({
+          time: document.getElementById(`itemTime_${i}`)?.value || it.time,
+          title: document.getElementById(`itemTitle_${i}`)?.value || it.title
+        }));
+        state_.items.splice(parseInt(btn.dataset.rm, 10), 1);
+        renderItems();
+      };
+    });
+  }
+
+  render();
 }
 
 /* ===================== 지점 성과 지표 - 구글 시트 임베드 (지점별 탭) ===================== */
@@ -366,34 +333,92 @@ function renderPlainSheetTable(container, rows) {
   container.innerHTML = html;
 }
 
-async function renderBranchSheet(section) {
-  const main = document.getElementById("mainContent");
-  const branchId = canViewAllRole() ? state.branchFilter[section.key] : state.profile.branchId;
-  const branchObj = branchId ? state.branches.find(b => b.id === branchId) : null;
-  const tabName = branchObj ? `${stripBranchSuffix(branchObj.name)}_2026` : "셀프팀_2026";
-  const label = branchObj ? branchObj.name : "전체";
+const EVAL_SPREADSHEET_ID = "1TA3ObFLBQGb9dmKlOEL4XxPmE308ifyOPhxzEzAe-I8";
 
+async function renderEvalSheet(section) {
+  const main = document.getElementById("mainContent");
   main.innerHTML = `<div class="page-header">
       <div>
-        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label} · ${escapeHtml(label)}</h1>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
         <p>${section.desc}</p>
       </div>
-      <div style="display:flex;gap:8px;">
-        <a href="https://docs.google.com/spreadsheets/d/1uequoelbdG3zLzo-FgqbDsPIlb7NGFIasS_82ZzE6iA/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">고객 지표 시트 열기</a>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <a href="https://docs.google.com/spreadsheets/d/${EVAL_SPREADSHEET_ID}/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">원본 시트 열기</a>
         <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
+        <select id="evalYearSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
       </div>
     </div>
-    <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="branchSheetWrap">${googleAccessToken ? "불러오는 중..." : '오른쪽 위 "구글 계정으로 연결" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요.'}</div></div>`;
+    ${state.profile.role === "leader" ? `
+    <div class="card" id="evalSheetAdminCard">
+      <h2>연도 탭 등록/관리</h2>
+      <form id="evalSheetAddForm" class="grid-3" style="align-items:end;">
+        <div class="field" style="margin:0;"><label>표시 이름 (예: 2026년)</label><input type="text" id="newEvalLabel" required></div>
+        <div class="field" style="margin:0;"><label>구글 시트 탭 이름</label><input type="text" id="newEvalTab" placeholder="예: 평가지표_2026" required></div>
+        <button class="btn" type="submit">추가</button>
+      </form>
+      <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">시트 아래쪽 탭에 표시된 이름을 그대로 입력하세요 (예: 평가지표_2026).</p>
+      <div id="evalSheetList" style="margin-top:14px;"></div>
+    </div>` : ""}
+    <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="evalSheetWrap">불러오는 중...</div></div>`;
 
   document.getElementById("googleAuthBtn").onclick = async () => {
     try { await requestGoogleAuth(); showToast("구글 계정이 연결되었습니다."); renderSection(section.key); }
     catch (err) { alert(err.message); }
   };
 
-  if (!googleAccessToken) return;
-  const wrap = document.getElementById("branchSheetWrap");
+  const snap = await getDocs(collection(db, "evalSheets"));
+  const tabs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
+
+  const yearSelect = document.getElementById("evalYearSelect");
+  const wrap = document.getElementById("evalSheetWrap");
+
+  if (!tabs.length) {
+    yearSelect.innerHTML = `<option value="">등록된 연도가 없습니다</option>`;
+    wrap.innerHTML = `<div class="empty-state">등록된 연도가 없습니다. ${state.profile.role === "leader" ? "위에서 연도를 먼저 등록해주세요." : "팀장에게 문의해주세요."}</div>`;
+  } else {
+    yearSelect.innerHTML = tabs.map(t => `<option value="${escapeHtml(t.tabName)}">${escapeHtml(t.label)}</option>`).join("");
+    yearSelect.onchange = () => loadEvalTab(yearSelect.value);
+    if (googleAccessToken) await loadEvalTab(tabs[tabs.length - 1].tabName);
+    else wrap.innerHTML = '오른쪽 위 "구글 계정으로 연결" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요.';
+  }
+
+  if (state.profile.role === "leader") {
+    renderEvalSheetList(tabs);
+    document.getElementById("evalSheetAddForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const label = document.getElementById("newEvalLabel").value.trim();
+      const tabName = document.getElementById("newEvalTab").value.trim();
+      if (!label || !tabName) return;
+      await addDoc(collection(db, "evalSheets"), { label, tabName, createdAt: new Date().toISOString() });
+      showToast("연도가 등록되었습니다.");
+      renderSection(section.key);
+    });
+  }
+}
+
+function renderEvalSheetList(tabs) {
+  const wrap = document.getElementById("evalSheetList");
+  if (!tabs.length) { wrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 등록된 연도가 없습니다.</p>`; return; }
+  wrap.innerHTML = `<table><thead><tr><th>표시 이름</th><th>탭 이름</th><th></th></tr></thead><tbody>
+    ${tabs.map(t => `<tr><td>${escapeHtml(t.label)}</td><td class="mono">${escapeHtml(t.tabName)}</td>
+      <td class="actions"><button class="icon-btn danger" data-eid="${t.id}">삭제</button></td></tr>`).join("")}
+  </tbody></table>`;
+  wrap.querySelectorAll("[data-eid]").forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm("이 연도 등록을 삭제할까요? (구글 시트 자체는 삭제되지 않습니다)")) return;
+      await deleteDoc(doc(db, "evalSheets", btn.dataset.eid));
+      showToast("삭제되었습니다.");
+      renderSection(getSectionByKey("performance").key);
+    };
+  });
+}
+
+async function loadEvalTab(tabName) {
+  const wrap = document.getElementById("evalSheetWrap");
+  if (!tabName) { wrap.innerHTML = `<div class="empty-state">표시할 연도를 선택해주세요.</div>`; return; }
+  wrap.innerHTML = `<div class="empty-state"><div class="shape"></div>불러오는 중...</div>`;
   try {
-    const rows = await fetchSheetValues(PERFORMANCE_SPREADSHEET_ID, tabName);
+    const rows = await fetchSheetValues(EVAL_SPREADSHEET_ID, tabName);
     renderPlainSheetTable(wrap, rows);
   } catch (err) {
     wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}<br><span style="font-size:12px;">시트에 "${escapeHtml(tabName)}" 이름의 탭이 있는지 확인해주세요.</span></div>`;
@@ -790,9 +815,9 @@ async function renderSection(key) {
 
   const section = getSectionByKey(key);
   if (!section) { main.innerHTML = `<div class="empty-state">찾을 수 없는 메뉴입니다.</div>`; return; }
-  if (section.isScheduleSheet) { renderScheduleSheet(section); return; }
+  if (section.isMonthlySchedule) { renderMonthlySchedule(section); return; }
   if (section.cardView) { renderLogCards(section); return; }
-  if (section.isBranchSheet) { renderBranchSheet(section); return; }
+  if (section.isEvalSheet) { renderEvalSheet(section); return; }
   if (section.isOpsGrid) { renderOpsGrid(section); return; }
   if (section.isOkr) { renderOkrFolder(section); return; }
   if (section.isRosterGrid) { renderRosterGrid(section); return; }

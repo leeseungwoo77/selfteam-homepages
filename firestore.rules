@@ -23,12 +23,9 @@ service cloud.firestore {
     }
 
     // 팀 전체 공용 자료 - 팀장만 작성/수정 (팀장 일정, 공지사항, 리더십 자료)
-    match /schedules/{id}   { allow read: if isSignedIn(); allow write: if isLeader(); }
+    match /scheduleEntries/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
     match /notices/{id}     { allow read: if isSignedIn(); allow write: if isLeader(); }
     match /leadership/{id}  { allow read: if isSignedIn(); allow write: if isLeader(); }
-
-    // 팀장 일정 - 구글 시트 탭(월) 등록 정보. 팀장만 추가/삭제, 로그인한 누구나 조회
-    match /scheduleSheets/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
 
     // 사용자 정의 폴더 - 팀장만 폴더 생성/삭제, 로그인한 누구나 목록 조회
     match /customFolders/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
@@ -59,6 +56,9 @@ service cloud.firestore {
       allow write: if isSignedIn() && (isLeader() || request.resource.data.branchId == myBranch());
       allow delete: if isSignedIn() && (isLeader() || resource.data.branchId == myBranch());
     }
+
+    // 성과 지표 - 구글 시트 탭(연도) 등록 정보. 팀장만 추가/삭제, 로그인한 누구나 조회
+    match /evalSheets/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
 
     // 지점 인적 구성 - 팀장만 수정, 로그인한 누구나 조회
     match /rosterEntries/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
