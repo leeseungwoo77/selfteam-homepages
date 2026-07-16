@@ -110,7 +110,7 @@ const COLOR_HEX = { blue:"var(--blue-bright)", green:"var(--green-bright)", mage
 const GOOGLE_CLIENT_ID = "708745145673-j0ljnhqsl7gg0djq5p9j7uop040thqbe.apps.googleusercontent.com";
 const GOOGLE_SCOPES = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.readonly";
 const LOCATION_COLORS = {
-  "에듀본사": "#E03C3C", "상상": "#F5A623", "전능": "#3B9BE8",
+  "에듀본사": "#E03C3C", "상상": "#F5A623", "전능": "#3B9BE8", "전농": "#3B9BE8",
   "돈암": "#3FA33F", "행당": "#D3339C", "별내": "#E8D227", "다산": "#8E1E1E"
 };
 function matchLocationColor(str) {
@@ -164,13 +164,20 @@ async function fetchSheetValues(spreadsheetId, sheetName) {
   return data.values || [];
 }
 
-/* ===================== 팀장 일정 - 홈페이지에서 직접 입력 (월 단위) ===================== */
+/* ===================== 팀장 일정 - 홈페이지에서 직접 입력 (월 단위, 30분 단위 시간표) ===================== */
 function pad2(n) { return String(n).padStart(2, "0"); }
 function ymd(y, m, d) { return `${y}-${pad2(m)}-${pad2(d)}`; }
 function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
 function weekdayLabel(y, m, d) {
   return ["일","월","화","수","목","금","토"][new Date(y, m - 1, d).getDay()];
 }
+function generateTimeSlots() {
+  const slots = [];
+  for (let h = 10; h < 22; h++) { slots.push(`${pad2(h)}:00`); slots.push(`${pad2(h)}:30`); }
+  return slots; // 10:00 ~ 21:30, 30분 단위
+}
+const SCHEDULE_TIME_SLOTS = generateTimeSlots();
+const SCHEDULE_NOTE_ROWS = ["에듀본사", "전농", "돈암", "행당", "별내", "다산"];
 
 const scheduleViewState = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
 
@@ -180,7 +187,7 @@ async function renderMonthlySchedule(section) {
   main.innerHTML = `<div class="page-header">
       <div>
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
-        <p>${section.desc}</p>
+        <p>${section.desc}${canEdit ? " · 날짜를 클릭하면 그 날 일정을 수정할 수 있어요." : ""}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
         <button class="icon-btn" id="prevMonthBtn" style="font-size:18px;">‹</button>
@@ -188,7 +195,7 @@ async function renderMonthlySchedule(section) {
         <button class="icon-btn" id="nextMonthBtn" style="font-size:18px;">›</button>
       </div>
     </div>
-    <div id="scheduleCalendar">불러오는 중...</div>`;
+    <div class="card" style="overflow:auto;max-height:calc(100vh - 190px);"><div id="scheduleCalendar">불러오는 중...</div></div>`;
 
   document.getElementById("prevMonthBtn").onclick = () => {
     scheduleViewState.month--;
@@ -210,47 +217,95 @@ async function renderMonthlySchedule(section) {
   const byDate = {};
   snap.docs.forEach(d => { byDate[d.id] = d.data(); });
 
-  const wrap = document.getElementById("scheduleCalendar");
   const nDays = daysInMonth(year, month);
-  let html = "";
-  for (let d = 1; d <= nDays; d++) {
-    const dateStr = ymd(year, month, d);
-    const wd = weekdayLabel(year, month, d);
-    const entry = byDate[dateStr] || { location: "", items: [] };
-    const items = entry.items || [];
-    const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
-    const locColor = entry.location ? matchLocationColor(entry.location) : null;
+  const dates = [];
+  for (let d = 1; d <= nDays; d++) dates.push(d);
 
-    html += `<div class="card" style="padding:14px 20px;margin-bottom:8px;">
-      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-        <div style="min-width:70px;font-weight:800;color:${wdColor};">${month}.${pad2(d)}(${wd})</div>
-        ${entry.location ? `<span style="padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;${locColor ? `background:${locColor};color:#fff;` : "background:var(--border);"}">${escapeHtml(entry.location)}</span>` : ""}
-        <div style="flex:1;font-size:13.5px;color:var(--text-main);display:flex;flex-wrap:wrap;gap:6px 16px;">
-          ${items.length ? items.map(it => `<span><strong>${escapeHtml(it.time || "")}</strong> ${escapeHtml(it.title || "")}</span>`).join("") : (canEdit ? `<span style="color:var(--text-muted);">일정 없음</span>` : "")}
-        </div>
-        ${canEdit ? `<button class="icon-btn" data-edit-day="${dateStr}">수정</button>` : ""}
-      </div>
-    </div>`;
-  }
-  wrap.innerHTML = html;
+  const cellStyle = "white-space:nowrap;padding:5px 10px;";
+  const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;";
+
+  let html = `<table class="table-compact" style="width:max-content;"><thead>
+    <tr>
+      <th style="position:sticky;left:0;top:0;background:#F4FAEF;z-index:3;">날짜</th>
+      ${dates.map(d => {
+        const wd = weekdayLabel(year, month, d);
+        const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
+        const clickable = canEdit ? `cursor:pointer;text-decoration:underline;` : "";
+        return `<th style="position:sticky;top:0;background:#F4FAEF;z-index:2;color:${wdColor};${clickable}" ${canEdit ? `data-edit-day="${ymd(year, month, d)}"` : ""}>${month}.${pad2(d)}(${wd})</th>`;
+      }).join("")}
+    </tr>
+  </thead><tbody>`;
+
+  // 근무장소 행
+  html += `<tr><td style="${leftLabelStyle}">근무장소</td>`;
+  dates.forEach(d => {
+    const entry = byDate[ymd(year, month, d)];
+    const loc = entry?.location || "";
+    const bg = loc ? matchLocationColor(loc) : null;
+    html += `<td style="${cellStyle}${bg ? `background:${bg};color:#fff;font-weight:700;border-radius:4px;` : ""}">${escapeHtml(loc)}</td>`;
+  });
+  html += `</tr>`;
+
+  // 지점별 특이사항 행 (에듀본사/전농/돈암/행당/별내/다산)
+  SCHEDULE_NOTE_ROWS.forEach(rowLabel => {
+    const rowColor = LOCATION_COLORS[rowLabel] || "#9CA88F";
+    html += `<tr><td style="${leftLabelStyle}background:${rowColor};color:#fff;">${escapeHtml(rowLabel)}</td>`;
+    dates.forEach(d => {
+      const entry = byDate[ymd(year, month, d)];
+      const note = (entry?.notes && entry.notes[rowLabel]) || "";
+      html += `<td style="${cellStyle}">${escapeHtml(note)}</td>`;
+    });
+    html += `</tr>`;
+  });
+
+  // 30분 단위 시간표 행
+  SCHEDULE_TIME_SLOTS.forEach(slot => {
+    html += `<tr><td style="${leftLabelStyle}">${slot}</td>`;
+    dates.forEach(d => {
+      const entry = byDate[ymd(year, month, d)];
+      const items = entry?.items || [];
+      const item = items.find(it => it.startTime && it.endTime && slot >= it.startTime && slot < it.endTime);
+      const bg = item ? matchLocationColor(item.title || "") : null;
+      const style = item
+        ? (bg ? `background:${bg};color:#fff;font-weight:700;border-radius:4px;` : `background:#EDEDED;`)
+        : "";
+      html += `<td style="${cellStyle}${style}">${item ? escapeHtml(item.title || "") : ""}</td>`;
+    });
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table>`;
+  document.getElementById("scheduleCalendar").innerHTML = html;
 
   if (canEdit) {
-    wrap.querySelectorAll("[data-edit-day]").forEach(btn => {
-      btn.onclick = () => openScheduleDayModal(section, btn.dataset.editDay, byDate[btn.dataset.editDay]);
+    document.querySelectorAll("[data-edit-day]").forEach(th => {
+      th.onclick = () => openScheduleDayModal(section, th.dataset.editDay, byDate[th.dataset.editDay]);
     });
   }
 }
 
 function openScheduleDayModal(section, dateStr, existing) {
   const root = document.getElementById("modalRoot");
-  const state_ = { location: (existing && existing.location) || "", items: (existing && existing.items) ? existing.items.map(i => ({ ...i })) : [] };
+  const state_ = {
+    location: (existing && existing.location) || "",
+    notes: (existing && existing.notes) ? { ...existing.notes } : {},
+    items: (existing && existing.items) ? existing.items.map(i => ({ ...i })) : []
+  };
 
   function render() {
     root.innerHTML = `<div class="modal-bg" id="modalBg">
-      <div class="modal">
+      <div class="modal" style="max-width:560px;">
         <h3>${dateStr} 일정</h3>
-        <div class="field"><label>근무 장소</label><input type="text" id="dayLocation" placeholder="예: 상상, 상상/전능" value="${escapeHtml(state_.location)}"></div>
-        <div class="field"><label>일정 목록</label>
+        <div class="field"><label>근무 장소</label><input type="text" id="dayLocation" placeholder="예: 상상, 상상 전능" value="${escapeHtml(state_.location)}"></div>
+        <div class="field"><label>지점별 특이사항</label>
+          <div class="grid-2">
+            ${SCHEDULE_NOTE_ROWS.map(label => `<div>
+              <label style="font-size:11px;">${escapeHtml(label)}</label>
+              <input type="text" id="note_${label}" value="${escapeHtml(state_.notes[label] || "")}">
+            </div>`).join("")}
+          </div>
+        </div>
+        <div class="field"><label>일정 목록 (30분 단위)</label>
           <div id="dayItems"></div>
           <button type="button" class="btn small secondary" id="addItemBtn" style="margin-top:6px;">+ 일정 추가</button>
         </div>
@@ -262,17 +317,18 @@ function openScheduleDayModal(section, dateStr, existing) {
     renderItems();
     document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
     document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
-    document.getElementById("addItemBtn").onclick = () => { state_.items.push({ time: "", title: "" }); renderItems(); };
+    document.getElementById("addItemBtn").onclick = () => { syncItemsFromInputs(); state_.items.push({ startTime: "", endTime: "", title: "" }); renderItems(); };
     document.getElementById("saveDayBtn").onclick = async () => {
-      state_.location = document.getElementById("dayLocation").value.trim();
-      const cleanItems = state_.items
-        .map((it, i) => ({
-          time: document.getElementById(`itemTime_${i}`)?.value.trim() || "",
-          title: document.getElementById(`itemTitle_${i}`)?.value.trim() || ""
-        }))
-        .filter(it => it.time || it.title);
+      syncItemsFromInputs();
+      const location = document.getElementById("dayLocation").value.trim();
+      const notes = {};
+      SCHEDULE_NOTE_ROWS.forEach(label => {
+        const v = document.getElementById(`note_${label}`).value.trim();
+        if (v) notes[label] = v;
+      });
+      const cleanItems = state_.items.filter(it => it.startTime && it.endTime && it.title);
       try {
-        await setDoc(doc(db, "scheduleEntries", dateStr), { date: dateStr, location: state_.location, items: cleanItems });
+        await setDoc(doc(db, "scheduleEntries", dateStr), { date: dateStr, location, notes, items: cleanItems });
         root.innerHTML = "";
         showToast("저장되었습니다.");
         renderSection(section.key);
@@ -282,23 +338,27 @@ function openScheduleDayModal(section, dateStr, existing) {
     };
   }
 
+  function syncItemsFromInputs() {
+    state_.items = state_.items.map((it, i) => ({
+      startTime: document.getElementById(`itemStart_${i}`)?.value || it.startTime || "",
+      endTime: document.getElementById(`itemEnd_${i}`)?.value || it.endTime || "",
+      title: document.getElementById(`itemTitle_${i}`)?.value || it.title || ""
+    }));
+  }
+
   function renderItems() {
     const wrap = document.getElementById("dayItems");
     wrap.innerHTML = state_.items.map((it, i) => `
-      <div class="grid-2" style="margin-bottom:6px;">
-        <input type="time" id="itemTime_${i}" value="${escapeHtml(it.time || "")}">
-        <div style="display:flex;gap:6px;">
-          <input type="text" id="itemTitle_${i}" placeholder="일정 제목" value="${escapeHtml(it.title || "")}" style="flex:1;">
-          <button type="button" class="icon-btn danger" data-rm="${i}">✕</button>
-        </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+        <input type="time" id="itemStart_${i}" value="${escapeHtml(it.startTime || "")}" step="1800" style="width:110px;">
+        <span style="color:var(--text-muted);">~</span>
+        <input type="time" id="itemEnd_${i}" value="${escapeHtml(it.endTime || "")}" step="1800" style="width:110px;">
+        <input type="text" id="itemTitle_${i}" placeholder="일정 제목" value="${escapeHtml(it.title || "")}" style="flex:1;">
+        <button type="button" class="icon-btn danger" data-rm="${i}">✕</button>
       </div>`).join("") || `<p style="font-size:12px;color:var(--text-muted);">등록된 일정이 없습니다.</p>`;
     wrap.querySelectorAll("[data-rm]").forEach(btn => {
       btn.onclick = () => {
-        // 입력 중인 값 보존 후 삭제
-        state_.items = state_.items.map((it, i) => ({
-          time: document.getElementById(`itemTime_${i}`)?.value || it.time,
-          title: document.getElementById(`itemTitle_${i}`)?.value || it.title
-        }));
+        syncItemsFromInputs();
         state_.items.splice(parseInt(btn.dataset.rm, 10), 1);
         renderItems();
       };
@@ -306,1137 +366,6 @@ function openScheduleDayModal(section, dateStr, existing) {
   }
 
   render();
-}
-
-/* ===================== 지점 성과 지표 - 구글 시트 임베드 (지점별 탭) ===================== */
-function stripBranchSuffix(name) {
-  return String(name || "").replace(/점$/, "");
-}
-
-function renderPlainSheetTable(container, rows) {
-  if (rows.length < 2) { container.innerHTML = `<div class="empty-state">이 시트에 표시할 데이터가 없습니다.</div>`; return; }
-  const dataRows = rows.slice(1); // 1행(제목/안내용 줄)은 표시하지 않음
-  const colIndexes = [];
-  for (let ci = 1; ci < dataRows[0].length; ci++) colIndexes.push(ci); // 0번(첫) 열도 제외
-
-  let html = `<table class="table-compact" style="width:max-content;"><tbody>`;
-  dataRows.forEach(row => {
-    html += `<tr>`;
-    colIndexes.forEach((ci, idx) => {
-      const isSticky = idx === 0;
-      const style = isSticky ? "font-weight:700;white-space:nowrap;position:sticky;left:0;background:#fff;" : "white-space:nowrap;";
-      html += `<td style="${style}">${escapeHtml(String(row[ci] ?? ""))}</td>`;
-    });
-    html += `</tr>`;
-  });
-  html += `</tbody></table>`;
-  container.innerHTML = html;
-}
-
-const EVAL_SPREADSHEET_ID = "1TA3ObFLBQGb9dmKlOEL4XxPmE308ifyOPhxzEzAe-I8";
-
-async function renderEvalSheet(section) {
-  const main = document.getElementById("mainContent");
-  main.innerHTML = `<div class="page-header">
-      <div>
-        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
-        <p>${section.desc}</p>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <a href="https://docs.google.com/spreadsheets/d/${EVAL_SPREADSHEET_ID}/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">원본 시트 열기</a>
-        <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
-        <select id="evalYearSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
-      </div>
-    </div>
-    ${state.profile.role === "leader" ? `
-    <div class="card" id="evalSheetAdminCard">
-      <h2>연도 탭 등록/관리</h2>
-      <form id="evalSheetAddForm" class="grid-3" style="align-items:end;">
-        <div class="field" style="margin:0;"><label>표시 이름 (예: 2026년)</label><input type="text" id="newEvalLabel" required></div>
-        <div class="field" style="margin:0;"><label>구글 시트 탭 이름</label><input type="text" id="newEvalTab" placeholder="예: 평가지표_2026" required></div>
-        <button class="btn" type="submit">추가</button>
-      </form>
-      <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">시트 아래쪽 탭에 표시된 이름을 그대로 입력하세요 (예: 평가지표_2026).</p>
-      <div id="evalSheetList" style="margin-top:14px;"></div>
-    </div>` : ""}
-    <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="evalSheetWrap">불러오는 중...</div></div>`;
-
-  document.getElementById("googleAuthBtn").onclick = async () => {
-    try { await requestGoogleAuth(); showToast("구글 계정이 연결되었습니다."); renderSection(section.key); }
-    catch (err) { alert(err.message); }
-  };
-
-  const snap = await getDocs(collection(db, "evalSheets"));
-  const tabs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
-
-  const yearSelect = document.getElementById("evalYearSelect");
-  const wrap = document.getElementById("evalSheetWrap");
-
-  if (!tabs.length) {
-    yearSelect.innerHTML = `<option value="">등록된 연도가 없습니다</option>`;
-    wrap.innerHTML = `<div class="empty-state">등록된 연도가 없습니다. ${state.profile.role === "leader" ? "위에서 연도를 먼저 등록해주세요." : "팀장에게 문의해주세요."}</div>`;
-  } else {
-    yearSelect.innerHTML = tabs.map(t => `<option value="${escapeHtml(t.tabName)}">${escapeHtml(t.label)}</option>`).join("");
-    yearSelect.onchange = () => loadEvalTab(yearSelect.value);
-    if (googleAccessToken) await loadEvalTab(tabs[tabs.length - 1].tabName);
-    else wrap.innerHTML = '오른쪽 위 "구글 계정으로 연결" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요.';
-  }
-
-  if (state.profile.role === "leader") {
-    renderEvalSheetList(tabs);
-    document.getElementById("evalSheetAddForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const label = document.getElementById("newEvalLabel").value.trim();
-      const tabName = document.getElementById("newEvalTab").value.trim();
-      if (!label || !tabName) return;
-      await addDoc(collection(db, "evalSheets"), { label, tabName, createdAt: new Date().toISOString() });
-      showToast("연도가 등록되었습니다.");
-      renderSection(section.key);
-    });
-  }
-}
-
-function renderEvalSheetList(tabs) {
-  const wrap = document.getElementById("evalSheetList");
-  if (!tabs.length) { wrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 등록된 연도가 없습니다.</p>`; return; }
-  wrap.innerHTML = `<table><thead><tr><th>표시 이름</th><th>탭 이름</th><th></th></tr></thead><tbody>
-    ${tabs.map(t => `<tr><td>${escapeHtml(t.label)}</td><td class="mono">${escapeHtml(t.tabName)}</td>
-      <td class="actions"><button class="icon-btn danger" data-eid="${t.id}">삭제</button></td></tr>`).join("")}
-  </tbody></table>`;
-  wrap.querySelectorAll("[data-eid]").forEach(btn => {
-    btn.onclick = async () => {
-      if (!confirm("이 연도 등록을 삭제할까요? (구글 시트 자체는 삭제되지 않습니다)")) return;
-      await deleteDoc(doc(db, "evalSheets", btn.dataset.eid));
-      showToast("삭제되었습니다.");
-      renderSection(getSectionByKey("performance").key);
-    };
-  });
-}
-
-async function loadEvalTab(tabName) {
-  const wrap = document.getElementById("evalSheetWrap");
-  if (!tabName) { wrap.innerHTML = `<div class="empty-state">표시할 연도를 선택해주세요.</div>`; return; }
-  wrap.innerHTML = `<div class="empty-state"><div class="shape"></div>불러오는 중...</div>`;
-  try {
-    const rows = await fetchSheetValues(EVAL_SPREADSHEET_ID, tabName);
-    renderPlainSheetTable(wrap, rows);
-  } catch (err) {
-    wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}<br><span style="font-size:12px;">시트에 "${escapeHtml(tabName)}" 이름의 탭이 있는지 확인해주세요.</span></div>`;
-  }
-}
-
-/* ===================== 지점 운영 자료 - 지점 × 양식 링크 대시보드 ===================== */
-async function loadOpsCategories() {
-  const snap = await getDocs(collection(db, "opsCategories"));
-  return snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order || 0) - (b.order || 0));
-}
-
-async function loadOpsLinks() {
-  const snap = await getDocs(collection(db, "opsLinks"));
-  const map = {};
-  snap.docs.forEach(d => { map[d.id] = { id: d.id, ...d.data() }; });
-  return map;
-}
-
-function canEditOpsCell(branchId) {
-  if (state.profile.role === "leader") return true;
-  if (state.profile.role === "viewer") return false;
-  return state.profile.branchId === branchId;
-}
-
-async function renderOpsGrid(section) {
-  const main = document.getElementById("mainContent");
-  main.innerHTML = `<div class="page-header">
-      <div>
-        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
-        <p>${section.desc}</p>
-      </div>
-    </div>
-    ${state.profile.role === "leader" ? `
-    <div class="card" id="categoryAdminCard">
-      <h2>양식(행) 추가</h2>
-      <form id="categoryForm" class="grid-2">
-        <input type="text" id="newCategoryLabel" placeholder="예: 등록현황, 주간회의록..." required>
-        <button class="btn" type="submit">추가</button>
-      </form>
-    </div>` : ""}
-    <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="opsGridWrap">불러오는 중...</div></div>`;
-
-  const [categories, branchesSorted] = await Promise.all([
-    loadOpsCategories(),
-    Promise.resolve([...state.branches].sort((a, b) => a.name.localeCompare(b.name, "ko")))
-  ]);
-  const linksMap = await loadOpsLinks();
-
-  if (state.profile.role === "leader") {
-    document.getElementById("categoryForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const label = document.getElementById("newCategoryLabel").value.trim();
-      if (!label) return;
-      const maxOrder = categories.reduce((m, c) => Math.max(m, c.order || 0), 0);
-      await addDoc(collection(db, "opsCategories"), { label, order: maxOrder + 1, createdAt: new Date().toISOString() });
-      showToast("추가되었습니다.");
-      renderOpsGrid(section);
-    });
-  }
-
-  renderOpsTable(categories, branchesSorted, linksMap);
-}
-
-async function moveCategory(categories, index, direction) {
-  const swapWith = direction === "up" ? index - 1 : index + 1;
-  if (swapWith < 0 || swapWith >= categories.length) return;
-  const a = categories[index], b = categories[swapWith];
-  const orderA = a.order || 0, orderB = b.order || 0;
-  await Promise.all([
-    updateDoc(doc(db, "opsCategories", a.id), { order: orderB }),
-    updateDoc(doc(db, "opsCategories", b.id), { order: orderA })
-  ]);
-  renderSection("operation");
-}
-
-function openCategoryEditModal(categoryId, currentLabel) {
-  const root = document.getElementById("modalRoot");
-  root.innerHTML = `<div class="modal-bg" id="modalBg">
-    <div class="modal">
-      <h3>양식 이름 수정</h3>
-      <form id="categoryEditForm">
-        <div class="field"><label>양식 이름</label><input type="text" id="categoryEditLabel" value="${escapeHtml(currentLabel)}" required></div>
-        <div class="grid-2" style="margin-top:10px;">
-          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
-          <button type="submit" class="btn">저장</button>
-        </div>
-      </form>
-    </div></div>`;
-  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
-  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
-  document.getElementById("categoryEditForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const label = document.getElementById("categoryEditLabel").value.trim();
-    if (!label) return;
-    await updateDoc(doc(db, "opsCategories", categoryId), { label });
-    root.innerHTML = "";
-    showToast("수정되었습니다.");
-    renderSection("operation");
-  });
-}
-
-function renderOpsTable(categories, branchesSorted, linksMap) {
-  const wrap = document.getElementById("opsGridWrap");
-  if (!branchesSorted.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다. "지점 · 팀원 관리"에서 지점을 먼저 추가해주세요.</div>`; return; }
-  if (!categories.length) { wrap.innerHTML = `<div class="empty-state">${state.profile.role === "leader" ? "위에서 양식을 먼저 추가해주세요." : "아직 등록된 양식이 없습니다."}</div>`; return; }
-  const isLeaderView = state.profile.role === "leader";
-
-  let html = `<table style="min-width:700px;"><thead><tr><th style="position:sticky;left:0;background:#F4FAEF;">양식</th>
-    ${branchesSorted.map(b => `<th>${escapeHtml(b.name)}</th>`).join("")}${isLeaderView ? `<th>관리</th>` : ""}</tr></thead><tbody>`;
-  categories.forEach((cat, i) => {
-    html += `<tr><td style="font-weight:700;position:sticky;left:0;background:#fff;white-space:nowrap;">${escapeHtml(cat.label)}</td>`;
-    branchesSorted.forEach(b => {
-      const cellId = `${b.id}_${cat.id}`;
-      const link = linksMap[cellId];
-      const editable = canEditOpsCell(b.id);
-      const branchColor = matchLocationColor(b.name) || "var(--blue-deep)";
-      if (link && link.url) {
-        html += `<td style="white-space:nowrap;">
-          <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="ops-open-btn" style="background:${branchColor};">열기 ↗</a>
-          ${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">수정</button>` : ""}
-        </td>`;
-      } else {
-        html += `<td>${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">+ 링크 추가</button>` : `<span style="color:var(--text-muted);font-size:12px;">-</span>`}</td>`;
-      }
-    });
-    if (isLeaderView) {
-      html += `<td style="white-space:nowrap;">
-        <button class="icon-btn" data-move="up" data-idx="${i}" ${i === 0 ? "disabled style='opacity:.3;'" : ""}>▲</button>
-        <button class="icon-btn" data-move="down" data-idx="${i}" ${i === categories.length - 1 ? "disabled style='opacity:.3;'" : ""}>▼</button>
-        <button class="icon-btn" data-edit-cat="${cat.id}" data-label="${escapeHtml(cat.label)}">수정</button>
-        <button class="icon-btn danger" data-cid="${cat.id}">삭제</button>
-      </td>`;
-    }
-    html += `</tr>`;
-  });
-  html += `</tbody></table>`;
-  wrap.innerHTML = html;
-
-  wrap.querySelectorAll("[data-edit-cell]").forEach(btn => {
-    btn.onclick = () => openOpsLinkModal(btn.dataset.editCell, btn.dataset.branch, btn.dataset.cat, linksMap[btn.dataset.editCell]?.url || "");
-  });
-  wrap.querySelectorAll("[data-move]").forEach(btn => {
-    btn.onclick = () => moveCategory(categories, parseInt(btn.dataset.idx, 10), btn.dataset.move);
-  });
-  wrap.querySelectorAll("[data-edit-cat]").forEach(btn => {
-    btn.onclick = () => openCategoryEditModal(btn.dataset.editCat, btn.dataset.label);
-  });
-  wrap.querySelectorAll("[data-cid]").forEach(btn => {
-    btn.onclick = async () => {
-      if (!confirm("이 양식(행)을 삭제할까요? 등록된 링크들도 함께 안 보이게 됩니다.")) return;
-      await deleteDoc(doc(db, "opsCategories", btn.dataset.cid));
-      showToast("삭제되었습니다.");
-      renderSection("operation");
-    };
-  });
-}
-
-function openOpsLinkModal(cellId, branchId, categoryId, currentUrl) {
-  const root = document.getElementById("modalRoot");
-  root.innerHTML = `<div class="modal-bg" id="modalBg">
-    <div class="modal">
-      <h3>링크 설정</h3>
-      <form id="opsLinkForm">
-        <div class="field"><label>URL (구글 시트, 문서 등)</label><input type="url" id="opsLinkUrl" placeholder="https://..." value="${escapeHtml(currentUrl)}"></div>
-        <div class="grid-2" style="margin-top:10px;">
-          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
-          <button type="submit" class="btn">저장</button>
-        </div>
-        ${currentUrl ? `<button type="button" class="btn danger" id="removeLinkBtn" style="width:100%;margin-top:8px;">링크 삭제</button>` : ""}
-      </form>
-    </div></div>`;
-  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
-  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
-  document.getElementById("opsLinkForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const url = document.getElementById("opsLinkUrl").value.trim();
-    if (!url) { root.innerHTML = ""; return; }
-    await setDoc(doc(db, "opsLinks", cellId), {
-      branchId, categoryId, url, updatedAt: new Date().toISOString(), updatedBy: state.profile.name
-    });
-    root.innerHTML = "";
-    showToast("저장되었습니다.");
-    renderSection("operation");
-  });
-  const removeBtn = document.getElementById("removeLinkBtn");
-  if (removeBtn) {
-    removeBtn.onclick = async () => {
-      if (!confirm("이 링크를 삭제할까요?")) return;
-      await deleteDoc(doc(db, "opsLinks", cellId));
-      root.innerHTML = "";
-      showToast("삭제되었습니다.");
-      renderSection("operation");
-    };
-  }
-}
-
-
-const state = { user:null, profile:null, branches:[], customFolders:[], menuOverrides:{}, currentSection:"schedule", branchFilter:{}, navExpanded:{} };
-
-/* ===================== 인증 확인 ===================== */
-onAuthStateChanged(auth, async (user) => {
-  if (!user) { window.location.href = "index.html"; return; }
-  state.user = user;
-  let snap;
-  try {
-    snap = await getDoc(doc(db, "users", user.uid));
-  } catch (err) {
-    alert("프로필 정보를 불러오지 못했습니다: " + err.message);
-    await signOut(auth);
-    window.location.href = "index.html";
-    return;
-  }
-  if (!snap.exists()) {
-    // 프로필 문서가 없는 상태로 로그인된 경우: 무한 리다이렉트를 막기 위해 로그아웃 후 안내
-    alert("계정 정보(프로필)를 찾을 수 없습니다. 다시 회원가입해주세요.");
-    await signOut(auth);
-    window.location.href = "index.html";
-    return;
-  }
-  state.profile = snap.data();
-
-  document.getElementById("whoBox").innerHTML = `
-    <div class="name">${escapeHtml(state.profile.name || user.email)}</div>
-    <div class="role">${state.profile.role === "leader" ? "팀장" : state.profile.role === "viewer" ? "전체 열람 (뷰어)" : "팀원 · " + escapeHtml(state.profile.branchName || "")}</div>`;
-
-  await loadBranches();
-  await loadCustomFolders();
-  await loadMenuOverrides();
-  buildNav();
-  renderSection(state.currentSection);
-});
-
-document.getElementById("logoutBtn").onclick = () => signOut(auth);
-document.getElementById("navToggleBtn").onclick = () => {
-  document.querySelector(".sidebar").classList.toggle("nav-open");
-};
-
-async function loadBranches() {
-  const snap = await getDocs(collection(db, "branches"));
-  state.branches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-}
-
-async function loadCustomFolders() {
-  const snap = await getDocs(collection(db, "customFolders"));
-  state.customFolders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-}
-
-async function loadMenuOverrides() {
-  const snap = await getDocs(collection(db, "menuOverrides"));
-  const map = {};
-  snap.docs.forEach(d => { map[d.id] = d.data(); });
-  state.menuOverrides = map;
-}
-
-/* 팀장이 이름/그룹/색상을 바꾼 메뉴가 있으면 기본값 위에 덮어씌우기 */
-function withOverride(section) {
-  const o = state.menuOverrides[section.key];
-  if (!o) return section;
-  return { ...section, label: o.label || section.label, group: o.group || section.group, color: o.color || section.color };
-}
-
-/* 팀장이 만든 "사용자 정의 폴더"를 기존 SECTIONS 항목과 동일한 방식으로 다루기 위한 변환 */
-function folderToSection(folder) {
-  const base = {
-    key: "folder_" + folder.id,
-    label: folder.label,
-    group: folder.group,
-    color: folder.color || "neutral",
-    collectionName: "folderEntries",
-    scope: "custom",
-    folderId: folder.id,
-    writable: folder.writable || "leader",
-    template: folder.template || "standard",
-    desc: folder.desc || ""
-  };
-  if (folder.template === "okr") {
-    return { ...base, isOkr: true, desc: folder.desc || "시즌별 OKR(Objective · Key Result · Key Task)을 관리합니다." };
-  }
-  return {
-    ...base,
-    cardView: true,
-    headerFields: ["title"],
-    fields: [
-      { key: "title", label: "제목", type: "text" },
-      { key: "content", label: "내용", type: "richtext" },
-      { key: "link", label: "첨부 링크(URL)", type: "link" },
-      { key: "images", label: "첨부 이미지", type: "imageUpload" }
-    ]
-  };
-}
-
-function getSectionByKey(key) {
-  if (key.startsWith("folder_")) {
-    const folder = state.customFolders.find(f => "folder_" + f.id === key);
-    return folder ? withOverride(folderToSection(folder)) : null;
-  }
-  const s = SECTIONS.find(s => s.key === key);
-  return s ? withOverride(s) : null;
-}
-
-/* ===================== 사이드바 네비게이션 ===================== */
-function buildNav() {
-  const nav = document.getElementById("navGroups");
-  let html = "";
-  const allBuiltIn = SECTIONS.filter(s => !s.leaderOnly || canViewAllRole()).map(withOverride);
-  const allFolders = state.customFolders.map(f => withOverride(folderToSection(f)));
-  const allItems = [...allBuiltIn, ...allFolders];
-  GROUP_ORDER.forEach(group => {
-    const items = allItems.filter(s => s.group === group);
-    html += `<div class="nav-group"><div class="nav-group-label">${group}</div>`;
-    items.forEach(s => {
-      const expandable = s.hasBranchSubmenu && canViewAllRole();
-      const expanded = !!state.navExpanded[s.key];
-      html += `<div class="nav-item" data-key="${s.key}" data-branch="" data-expandable="${expandable}" style="--nav-color:${COLOR_HEX[s.color]}">
-        <span class="nav-label"><span class="dot" style="background:${COLOR_HEX[s.color]}"></span>${s.label}</span>
-        ${expandable ? `<span class="nav-chevron ${expanded ? "open" : ""}">›</span>` : ""}
-      </div>`;
-      if (expandable) {
-        html += `<div class="nav-sub" style="display:${expanded ? "block" : "none"};">
-          <div class="nav-subitem" data-key="${s.key}" data-branch="">전체</div>
-          ${state.branches.map(b => `<div class="nav-subitem" data-key="${s.key}" data-branch="${b.id}">${escapeHtml(b.name)}</div>`).join("")}
-        </div>`;
-      }
-    });
-    html += `</div>`;
-  });
-  if (state.profile.role === "leader") {
-    html += `<div class="nav-group"><div class="nav-group-label">관리</div>
-      <div class="nav-item" data-key="admin" style="--nav-color:#9CA88F">
-        <span class="nav-label"><span class="dot" style="background:#9CA88F"></span>지점 · 팀원 관리</span>
-      </div></div>`;
-  }
-  nav.innerHTML = html;
-  nav.querySelectorAll(".nav-item").forEach(el => {
-    el.onclick = () => {
-      const key = el.dataset.key;
-      if (el.dataset.expandable === "true") {
-        state.navExpanded[key] = !state.navExpanded[key];
-        buildNav();
-        return;
-      }
-      state.currentSection = key;
-      renderSection(key);
-      closeMobileNav();
-    };
-  });
-  nav.querySelectorAll(".nav-subitem").forEach(el => {
-    el.onclick = (e) => {
-      e.stopPropagation();
-      const key = el.dataset.key;
-      const branchId = el.dataset.branch || null;
-      state.currentSection = key;
-      state.branchFilter[key] = branchId;
-      renderSection(key);
-      closeMobileNav();
-    };
-  });
-}
-
-function closeMobileNav() {
-  if (window.innerWidth <= 860) document.querySelector(".sidebar").classList.remove("nav-open");
-}
-
-function markActiveNav(key) {
-  const branchId = state.branchFilter[key] || "";
-  document.querySelectorAll(".nav-item").forEach(el => el.classList.toggle("active", el.dataset.key === key && !el.classList.contains("nav-subitem")));
-  document.querySelectorAll(".nav-subitem").forEach(el => el.classList.toggle("active", el.dataset.key === key && (el.dataset.branch || "") === branchId));
-}
-
-/* ===================== 권한 판단 ===================== */
-function canViewAllRole() { return state.profile.role === "leader" || state.profile.role === "viewer"; }
-
-function canWriteSection(section) {
-  if (state.profile.role === "viewer") return false;
-  if (state.profile.role === "leader") return true;
-  if (section.writable === "all") return true;
-  if (section.writable === "leader-and-branch") return true; // 자기 지점 데이터만, 저장 시 branchId 강제
-  return false;
-}
-function canEditDoc(section, data) {
-  if (state.profile.role === "viewer") return false;
-  if (state.profile.role === "leader") return true;
-  if (section.writable === "all") return true;
-  if (section.writable === "leader-and-branch") return data.branchId === state.profile.branchId;
-  return false;
-}
-
-/* ===================== 섹션 렌더링(목록) ===================== */
-async function renderSection(key) {
-  markActiveNav(key);
-  const main = document.getElementById("mainContent");
-  if (key === "admin") { renderAdmin(); return; }
-
-  const section = getSectionByKey(key);
-  if (!section) { main.innerHTML = `<div class="empty-state">찾을 수 없는 메뉴입니다.</div>`; return; }
-  if (section.isMonthlySchedule) { renderMonthlySchedule(section); return; }
-  if (section.cardView) { renderLogCards(section); return; }
-  if (section.isEvalSheet) { renderEvalSheet(section); return; }
-  if (section.isOpsGrid) { renderOpsGrid(section); return; }
-  if (section.isOkr) { renderOkrFolder(section); return; }
-  if (section.isRosterGrid) { renderRosterGrid(section); return; }
-  const branchId = state.branchFilter[key];
-  const branchLabel = section.hasBranchSubmenu
-    ? (canViewAllRole()
-        ? (branchId ? " · " + (state.branches.find(b => b.id === branchId)?.name || "") : " · 전체")
-        : " · " + (state.profile.branchName || ""))
-    : "";
-  main.innerHTML = `<div class="page-header">
-      <div>
-        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}${branchLabel}</h1>
-        <p>${section.desc}</p>
-      </div>
-      ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
-    </div>
-    ${section.isPerformance ? `<div class="stat-grid" id="statGrid"></div>` : ""}
-    <div class="card"><div id="tableWrap">불러오는 중...</div></div>`;
-
-  if (canWriteSection(section)) {
-    document.getElementById("addBtn").onclick = () => openModal(section, null);
-  }
-
-  const docs = await fetchDocs(section);
-  if (section.isPerformance) renderStatGrid(docs);
-  renderTable(section, docs);
-}
-
-async function fetchDocs(section) {
-  const colRef = collection(db, section.collectionName);
-  let q;
-  if (section.scope === "custom") {
-    q = query(colRef, where("folderId", "==", section.folderId));
-  } else if (section.scope === "branch" && !canViewAllRole()) {
-    q = query(colRef, where("branchId", "==", state.profile.branchId));
-  } else if (section.scope === "branch" && state.branchFilter[section.key]) {
-    q = query(colRef, where("branchId", "==", state.branchFilter[section.key]));
-  } else {
-    q = colRef;
-  }
-  const snap = await getDocs(q);
-  const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  // 최신순 정렬 (date 또는 createdAt 기준, 인덱스 불필요하도록 클라이언트 정렬)
-  docs.sort((a, b) => (b.date || b.createdAt || "").localeCompare(a.date || a.createdAt || ""));
-  return docs;
-}
-
-function renderStatGrid(docs) {
-  const grid = document.getElementById("statGrid");
-  const revenue = docs.reduce((s, d) => s + (Number(d.revenue) || 0), 0);
-  const regs = docs.reduce((s, d) => s + (Number(d.newRegistrations) || 0), 0);
-  const avgRenewal = docs.length ? (docs.reduce((s, d) => s + (Number(d.renewalRate) || 0), 0) / docs.length).toFixed(1) : 0;
-  const avgConv = docs.length ? (docs.reduce((s, d) => s + (Number(d.consultationConversion) || 0), 0) / docs.length).toFixed(1) : 0;
-  grid.innerHTML = `
-    <div class="stat-card"><div class="label">총 매출</div><div class="value">${revenue.toLocaleString()}<span style="font-size:13px;">만원</span></div></div>
-    <div class="stat-card"><div class="label">총 신규 등록</div><div class="value">${regs.toLocaleString()}</div></div>
-    <div class="stat-card"><div class="label">평균 재등록률</div><div class="value">${avgRenewal}%</div></div>
-    <div class="stat-card"><div class="label">평균 상담 전환율</div><div class="value">${avgConv}%</div></div>`;
-}
-
-function renderTable(section, docs) {
-  const wrap = document.getElementById("tableWrap");
-  if (!docs.length) {
-    wrap.innerHTML = `<div class="empty-state"><div class="shape"></div>아직 등록된 자료가 없습니다.</div>`;
-    return;
-  }
-  const cols = section.columns || section.fields.slice(0, 3).map(f => f.key);
-  const fieldMap = Object.fromEntries(section.fields.map(f => [f.key, f]));
-
-  let html = `<table><thead><tr>`;
-  cols.forEach(c => html += `<th>${fieldMap[c] ? fieldMap[c].label : (c === "branchName" ? "지점" : c)}</th>`);
-  html += `<th></th></tr></thead><tbody>`;
-
-  docs.forEach(d => {
-    html += `<tr>`;
-    cols.forEach(c => {
-      let val = d[c] ?? "";
-      const f = fieldMap[c];
-      if (c === "important") {
-        val = val === "yes" ? `<span class="pill important">중요</span>` : `<span class="pill normal">일반</span>`;
-      } else if (f && f.type === "number") {
-        val = `<span class="mono">${val}</span>`;
-      } else if (typeof val === "string" && val.length > 60) {
-        val = escapeHtml(val.slice(0, 60)) + "…";
-      } else {
-        val = escapeHtml(String(val));
-      }
-      html += `<td>${val}</td>`;
-    });
-    const editable = canEditDoc(section, d);
-    html += `<td class="actions">
-      ${editable ? `<button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
-      <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>` : ""}
-    </td></tr>`;
-  });
-  html += `</tbody></table>`;
-  wrap.innerHTML = html;
-
-  wrap.querySelectorAll('[data-act="edit"]').forEach(btn => {
-    btn.onclick = () => openModal(section, docs.find(d => d.id === btn.dataset.id));
-  });
-  wrap.querySelectorAll('[data-act="del"]').forEach(btn => {
-    btn.onclick = async () => {
-      if (!confirm("정말 삭제하시겠습니까?")) return;
-      await deleteDoc(doc(db, section.collectionName, btn.dataset.id));
-      showToast("삭제되었습니다.");
-      renderSection(section.key);
-    };
-  });
-}
-
-/* ===================== 팀 회의 일지 - 카드형 인라인 렌더러 (팝업 없이 바로 표시) ===================== */
-async function renderLogCards(section) {
-  const main = document.getElementById("mainContent");
-  const branchId = state.branchFilter[section.key];
-  const branchLabel = section.hasBranchSubmenu
-    ? (canViewAllRole()
-        ? (branchId ? " · " + (state.branches.find(b => b.id === branchId)?.name || "") : " · 전체")
-        : " · " + (state.profile.branchName || ""))
-    : "";
-
-  main.innerHTML = `<div class="page-header">
-      <div>
-        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}${branchLabel}</h1>
-        <p>${section.desc}</p>
-      </div>
-      <div style="display:flex;gap:8px;">
-        ${section.extraLink ? `<a href="${section.extraLink.url}" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">${escapeHtml(section.extraLink.label)}</a>` : ""}
-        ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
-      </div>
-    </div>
-    <div id="logList">불러오는 중...</div>`;
-
-  if (canWriteSection(section)) {
-    document.getElementById("addBtn").onclick = () => openModal(section, null);
-  }
-
-  const docs = await fetchDocs(section);
-  const wrap = document.getElementById("logList");
-  if (!docs.length) {
-    wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>아직 등록된 자료가 없습니다.</div></div>`;
-    return;
-  }
-
-  const imageField = section.fields.find(f => f.type === "imageUpload");
-  const bodyFields = section.fields.filter(f =>
-    !section.headerFields.includes(f.key) && f.type !== "imageUpload" && f.key !== "branchId"
-  );
-
-  wrap.innerHTML = docs.map(d => {
-    const editable = canEditDoc(section, d);
-    const metaKeys = section.headerFields.filter(k => k !== "title");
-    const metaParts = metaKeys.map(k => d[k]).filter(Boolean).map(escapeHtml);
-    if (d.createdAt) metaParts.push("업로드: " + escapeHtml(String(d.createdAt).slice(0, 10)));
-    const metaText = metaParts.join(" · ");
-    const titleText = d.title ? escapeHtml(d.title) : (metaParts.length ? "" : "(제목 없음)");
-    const images = imageField ? (d[imageField.key] || []).filter(Boolean) : [];
-
-    const bodyHtml = bodyFields.map(f => {
-      const val = d[f.key];
-      if (!val) return "";
-      if (f.type === "link") {
-        return `<div style="margin:12px 0 4px;"><a href="${escapeHtml(String(val))}" target="_blank" rel="noopener" class="ops-open-btn" style="background:var(--blue-deep);">🔗 ${escapeHtml(f.label)} 열기</a></div>`;
-      }
-      const rendered = f.type === "richtext"
-        ? sanitizeRichHtml(String(val))
-        : escapeHtml(String(val)).replace(/\n/g, "<br>");
-      return `<div style="margin:12px 0 4px;"><strong>${escapeHtml(f.label)}</strong><div class="rich-content">${rendered}</div></div>`;
-    }).join("");
-
-    return `<div class="card meeting-card">
-      <div class="log-summary" data-toggle="${d.id}">
-        <div>
-          ${titleText ? `<div style="font-weight:800;font-size:15px;">${titleText}</div>` : ""}
-          <div style="font-size:12px;color:var(--text-muted);margin-top:${titleText ? "2px" : "0"};${!titleText ? "font-weight:800;font-size:15px;color:var(--text-main);" : ""}">${metaText}<span class="log-chevron">›</span></div>
-        </div>
-        ${editable ? `<div>
-          <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
-          <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
-        </div>` : ""}
-      </div>
-      <div class="log-body" id="body_${d.id}">
-        ${bodyHtml}
-        ${images.length ? `<div class="meeting-gallery">
-          ${images.map(url => `<span class="img-zoom-wrap"><img src="${url}" class="meeting-img" data-zoom="0" loading="lazy" onclick="cycleMeetingImgZoom(this)"></span>`).join("")}
-        </div>` : ""}
-      </div>
-    </div>`;
-  }).join("");
-
-  wrap.querySelectorAll(".log-summary").forEach(el => {
-    el.onclick = () => {
-      const body = document.getElementById(`body_${el.dataset.toggle}`);
-      const opening = !body.classList.contains("open");
-      body.classList.toggle("open", opening);
-      el.classList.toggle("open", opening);
-    };
-  });
-  wrap.querySelectorAll('[data-act="edit"]').forEach(btn => {
-    btn.onclick = (e) => { e.stopPropagation(); openModal(section, docs.find(d => d.id === btn.dataset.id)); };
-  });
-  wrap.querySelectorAll('[data-act="del"]').forEach(btn => {
-    btn.onclick = async (e) => {
-      e.stopPropagation();
-      if (!confirm("정말 삭제하시겠습니까?")) return;
-      await deleteDoc(doc(db, section.collectionName, btn.dataset.id));
-      showToast("삭제되었습니다.");
-      renderSection(section.key);
-    };
-  });
-}
-
-/* ===================== OKR 폴더 (시즌 · Objective · KR · KT) ===================== */
-function seasonOptions() {
-  const seasons = [
-    { n: 1, label: "1시즌 (3~5월)" },
-    { n: 2, label: "2시즌 (6~8월)" },
-    { n: 3, label: "3시즌 (9~11월)" },
-    { n: 4, label: "4시즌 (12~2월)" }
-  ];
-  const thisYear = new Date().getFullYear();
-  const opts = [];
-  for (let y = thisYear - 1; y <= thisYear + 1; y++) {
-    seasons.forEach(s => opts.push(`${y}년 ${s.label}`));
-  }
-  return opts;
-}
-
-function parseSeasonKey(season) {
-  const m = String(season || "").match(/(\d{4})년\s*(\d)시즌/);
-  if (!m) return 0;
-  return parseInt(m[1], 10) * 10 + parseInt(m[2], 10);
-}
-
-async function renderOkrFolder(section) {
-  const main = document.getElementById("mainContent");
-  main.innerHTML = `<div class="page-header">
-      <div>
-        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
-        <p>${section.desc}</p>
-      </div>
-      ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새 OKR 등록</button>` : ""}
-    </div>
-    <div id="okrList">불러오는 중...</div>`;
-
-  if (canWriteSection(section)) {
-    document.getElementById("addBtn").onclick = () => openOkrModal(section, null);
-  }
-
-  const docs = await fetchDocs(section);
-  docs.sort((a, b) => parseSeasonKey(b.season) - parseSeasonKey(a.season));
-  const wrap = document.getElementById("okrList");
-  if (!docs.length) {
-    wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>아직 등록된 OKR이 없습니다.</div></div>`;
-    return;
-  }
-
-  wrap.innerHTML = docs.map(d => {
-    const editable = canEditDoc(section, d);
-    const krs = d.krs || [];
-    const overall = krs.length ? Math.round(krs.reduce((s, k) => s + (k.achievement || 0), 0) / krs.length) : 0;
-    const objectivePreview = (d.objective || "").slice(0, 50) + ((d.objective || "").length > 50 ? "…" : "");
-    return `<div class="card meeting-card">
-      <div class="log-summary" data-toggle="${d.id}">
-        <div>
-          <div style="font-weight:800;font-size:15px;">${escapeHtml(d.season || "")}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${escapeHtml(objectivePreview)} · 종합 달성율 ${overall}%<span class="log-chevron">›</span></div>
-        </div>
-        ${editable ? `<div>
-          <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
-          <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
-        </div>` : ""}
-      </div>
-      <div class="log-body" id="body_${d.id}">
-        <p style="margin:0 0 14px;"><strong>Objective</strong><br>${escapeHtml(d.objective || "").replace(/\n/g, "<br>")}</p>
-        ${krs.map((k, i) => `
-          <div style="margin:0 0 12px;padding:12px 14px;background:#FBFEFA;border-radius:10px;border:1px solid var(--border);">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-              <strong style="font-size:13.5px;">KR${i + 1}. ${escapeHtml(k.title || "")}</strong>
-              <span class="mono" style="font-weight:700;color:var(--green-deep);white-space:nowrap;">${k.achievement || 0}%</span>
-            </div>
-            <div style="background:#EAF3E3;border-radius:6px;height:8px;margin:8px 0;overflow:hidden;">
-              <div style="background:var(--green-bright);height:100%;width:${k.achievement || 0}%;"></div>
-            </div>
-            ${(k.kts || []).length ? `<ul style="margin:6px 0 0 18px;font-size:13px;line-height:1.6;">${(k.kts || []).map(kt => `<li>${escapeHtml(kt)}</li>`).join("")}</ul>` : ""}
-          </div>`).join("")}
-      </div>
-    </div>`;
-  }).join("");
-
-  wrap.querySelectorAll(".log-summary").forEach(el => {
-    el.onclick = () => {
-      const body = document.getElementById(`body_${el.dataset.toggle}`);
-      const opening = !body.classList.contains("open");
-      body.classList.toggle("open", opening);
-      el.classList.toggle("open", opening);
-    };
-  });
-  wrap.querySelectorAll('[data-act="edit"]').forEach(btn => {
-    btn.onclick = (e) => { e.stopPropagation(); openOkrModal(section, docs.find(d => d.id === btn.dataset.id)); };
-  });
-  wrap.querySelectorAll('[data-act="del"]').forEach(btn => {
-    btn.onclick = async (e) => {
-      e.stopPropagation();
-      if (!confirm("정말 삭제하시겠습니까?")) return;
-      await deleteDoc(doc(db, "folderEntries", btn.dataset.id));
-      showToast("삭제되었습니다.");
-      renderSection(section.key);
-    };
-  });
-}
-
-function krBlockHtml(i, kr) {
-  const k = kr || { title: "", achievement: 0, kts: [] };
-  return `<div class="card" style="background:#FBFEFA;margin-bottom:12px;padding:16px;">
-    <h2 style="font-size:14px;margin:0 0 12px;">Key Result ${i + 1}</h2>
-    <div class="field"><label>KR${i + 1} 내용 (정량적 목표)</label><input type="text" id="krTitle_${i}" value="${escapeHtml(k.title || "")}"></div>
-    <div class="field"><label>달성율 (%)</label><input type="number" id="krAch_${i}" min="0" max="100" value="${k.achievement || 0}"></div>
-    <div class="field"><label>Key Task (최대 3개)</label>
-      ${[0, 1, 2].map(j => `<input type="text" id="kt_${i}_${j}" placeholder="KT ${j + 1}" value="${escapeHtml((k.kts && k.kts[j]) || "")}" style="margin-bottom:6px;">`).join("")}
-    </div>
-  </div>`;
-}
-
-function openOkrModal(section, existing) {
-  const root = document.getElementById("modalRoot");
-  const seasons = seasonOptions();
-  const krs = (existing && existing.krs) || [{}, {}, {}];
-
-  root.innerHTML = `<div class="modal-bg" id="modalBg">
-    <div class="modal" style="max-width:560px;">
-      <h3>${existing ? "수정" : "새 OKR 등록"} · ${section.label}</h3>
-      <form id="okrForm">
-        <div class="field"><label>시즌</label>
-          <select id="okrSeason">${seasons.map(s => `<option value="${s}" ${existing && existing.season === s ? "selected" : ""}>${s}</option>`).join("")}</select>
-        </div>
-        <div class="field"><label>Objective (목적 · 정성적 서술)</label><textarea id="okrObjective" rows="2">${escapeHtml((existing && existing.objective) || "")}</textarea></div>
-        ${[0, 1, 2].map(i => krBlockHtml(i, krs[i])).join("")}
-        <div class="grid-2" style="margin-top:10px;">
-          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
-          <button type="submit" class="btn" id="saveBtn">저장</button>
-        </div>
-      </form>
-    </div></div>`;
-
-  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
-  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
-
-  document.getElementById("okrForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const saveBtn = document.getElementById("saveBtn");
-    saveBtn.disabled = true;
-    saveBtn.textContent = "저장 중...";
-    try {
-      const season = document.getElementById("okrSeason").value;
-      const objective = document.getElementById("okrObjective").value.trim();
-      const krsData = [0, 1, 2].map(i => ({
-        title: document.getElementById(`krTitle_${i}`).value.trim(),
-        achievement: Math.max(0, Math.min(100, parseInt(document.getElementById(`krAch_${i}`).value, 10) || 0)),
-        kts: [0, 1, 2].map(j => document.getElementById(`kt_${i}_${j}`).value.trim()).filter(Boolean)
-      }));
-      const data = {
-        folderId: section.folderId, season, objective, krs: krsData,
-        updatedAt: new Date().toISOString(), updatedBy: state.profile.name
-      };
-      if (existing) {
-        await updateDoc(doc(db, "folderEntries", existing.id), data);
-      } else {
-        data.createdAt = new Date().toISOString();
-        data.createdBy = state.profile.name;
-        await addDoc(collection(db, "folderEntries"), data);
-      }
-      root.innerHTML = "";
-      showToast("저장되었습니다.");
-      renderSection(section.key);
-    } catch (err) {
-      alert("저장 중 오류: " + err.message);
-      saveBtn.disabled = false;
-      saveBtn.textContent = "저장";
-    }
-  });
-}
-
-/* ===================== 지점 인적 구성 - 홈페이지에서 직접 관리 ===================== */
-const ROSTER_LEGEND = [
-  { key:"잔류", label:"잔류", color:"#0000FF" },
-  { key:"신규입사", label:"신규 입사", color:"#00FFFF" },
-  { key:"지점이동In", label:"지점 이동 In", color:"#00FF00" },
-  { key:"지점이동Out", label:"지점 이동 Out", color:"#FF9900" },
-  { key:"타팀이동Out", label:"타팀 이동 Out", color:"#FFFF00" },
-  { key:"퇴사", label:"퇴사", color:"#FF0000" }
-];
-const ROSTER_STATUS_COLOR = Object.fromEntries(ROSTER_LEGEND.map(l => [l.key, l.color]));
-
-// 2026년까지의 기존 자료 (엑셀에서 가져온 초기값). 지점별로 "불러오기" 버튼을 한 번 누르면
-// Firestore에 저장되고, 이후로는 전부 홈페이지에서 직접 관리합니다.
-const ROSTER_SEED_DATA = [{"branch": "행당", "years": ["2022년", "2023년", "2024년", "2025년", "2026년"], "people": [[{"name": "윤서연", "status": "잔류"}, {"name": "윤서연", "status": "잔류"}, {"name": "윤서연", "status": "잔류"}, {"name": "윤서연", "status": "잔류"}, {"name": "윤서연", "status": "잔류"}], [{"name": "김선희", "status": "신규입사"}, {"name": "김선희", "status": "잔류"}, {"name": "김선희", "status": "잔류"}, {"name": "김선희", "status": "잔류"}, {"name": "김선희", "status": "잔류"}], [{"name": "조이령", "status": "신규입사"}, {"name": "조이령", "status": "잔류"}, {"name": "조이령", "status": "잔류"}, {"name": "조이령", "status": "잔류"}, {"name": "조이령", "status": "잔류"}], [{"name": "", "status": null}, {"name": "김광수", "status": "신규입사"}, {"name": "김광수", "status": "지점이동Out"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "박승연", "status": "신규입사"}, {"name": "박승연", "status": "퇴사"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "박화영", "status": "지점이동In"}, {"name": "박화영", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "임승호", "status": "지점이동In"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "류채연", "status": "신규입사"}]]}, {"branch": "전농", "years": ["2022년", "2023년", "2024년", "2025년", "2026년"], "people": [[{"name": "", "status": null}, {"name": "한성호", "status": "잔류"}, {"name": "한성호", "status": "잔류"}, {"name": "한성호", "status": "타팀이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "김지나", "status": "지점이동In"}, {"name": "김지나", "status": "잔류"}, {"name": "김지나", "status": "잔류"}, {"name": "김지나", "status": "잔류"}], [{"name": "", "status": null}, {"name": "박화영", "status": "잔류"}, {"name": "박화영", "status": "잔류"}, {"name": "박화영", "status": "지점이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "김성은", "status": "잔류"}, {"name": "김성은", "status": "잔류"}, {"name": "김성은", "status": "잔류"}, {"name": "김성은", "status": "잔류"}], [{"name": "", "status": null}, {"name": "한승희", "status": "잔류"}, {"name": "한승희", "status": "잔류"}, {"name": "한승희", "status": "퇴사"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "강승협", "status": "지점이동In"}, {"name": "강승협", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "임소연", "status": "지점이동In"}, {"name": "임소연", "status": "퇴사"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "윤재원", "status": "신규입사"}]]}, {"branch": "돈암", "years": ["2022년", "2023년", "2024년", "2025년", "2026년"], "people": [[{"name": "", "status": null}, {"name": "이유민", "status": "잔류"}, {"name": "이유민", "status": "잔류"}, {"name": "이유민", "status": "잔류"}, {"name": "이유민", "status": "잔류"}], [{"name": "", "status": null}, {"name": "김지영", "status": "잔류"}, {"name": "김지영", "status": "타팀이동Out"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "임승호", "status": "지점이동In"}, {"name": "임승호", "status": "지점이동Out"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "조누리", "status": "잔류"}, {"name": "조누리", "status": "잔류"}, {"name": "조누리", "status": "퇴사"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "이영호", "status": "잔류"}, {"name": "이영호", "status": "잔류"}, {"name": "이영호", "status": "잔류"}, {"name": "이영호", "status": "잔류"}], [{"name": "", "status": null}, {"name": "황희선", "status": "신규입사"}, {"name": "황희선", "status": "잔류"}, {"name": "황희선", "status": "잔류"}, {"name": "황희선", "status": "잔류"}], [{"name": "", "status": null}, {"name": "김태목", "status": "신규입사"}, {"name": "김태목", "status": "퇴사"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "강승협", "status": "신규입사"}, {"name": "강승협", "status": "지점이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "김광수", "status": "지점이동In"}, {"name": "김광수", "status": "잔류"}, {"name": "김광수", "status": "타팀이동Out"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "김진혁", "status": "신규입사"}, {"name": "김진혁", "status": "잔류"}, {"name": "김진혁", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "송보경", "status": "잔류"}, {"name": "송보경", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "이정은", "status": "지점이동In"}, {"name": "이정은", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "홍지연", "status": "신규입사"}]]}, {"branch": "별내", "years": ["2022년", "2023년", "2024년", "2025년", "2026년"], "people": [[{"name": "", "status": null}, {"name": "박진희", "status": "잔류"}, {"name": "박진희", "status": "퇴사"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "이하나", "status": "잔류"}, {"name": "이하나", "status": "타팀이동Out"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "신축복", "status": "퇴사"}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "은혜리", "status": "잔류"}, {"name": "은혜리", "status": "잔류"}, {"name": "은혜리", "status": "타팀이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "이혜진", "status": "퇴사"}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "임승호", "status": "지점이동In"}, {"name": "임승호", "status": "잔류"}, {"name": "임승호", "status": "타팀이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "최윤호", "status": "신규입사"}, {"name": "최윤호", "status": "지점이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "서지은", "status": "신규입사"}, {"name": "서지은", "status": "잔류"}, {"name": "서지은", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "강건우", "status": "퇴사"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "김영상", "status": "신규입사"}, {"name": "김영상", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "박은별", "status": "지점이동In"}, {"name": "박은별", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "이유진", "status": "신규입사"}, {"name": "이유진", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "이준희", "status": "신규입사"}]]}, {"branch": "다산", "years": ["2022년", "2023년", "2024년", "2025년", "2026년"], "people": [[{"name": "", "status": null}, {"name": "", "status": null}, {"name": "전광수", "status": "지점이동In"}, {"name": "전광수", "status": "잔류"}, {"name": "전광수", "status": "잔류"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "허태강", "status": "퇴사"}, {"name": "", "status": null}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "임소연", "status": "신규입사"}, {"name": "임소연", "status": "지점이동Out"}, {"name": "", "status": null}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "정지은", "status": "지점이동In"}, {"name": "정지은", "status": "잔류"}, {"name": "정지은", "status": "퇴사"}], [{"name": "", "status": null}, {"name": "", "status": null}, {"name": "", "status": null}, {"name": "김상현", "status": "신규입사"}, {"name": "김상현", "status": "잔류"}]]}]
-;
-
-function textColorForBg(hex) {
-  if (!hex) return "inherit";
-  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6 ? "#222" : "#fff";
-}
-
-function renderRosterLegend() {
-  const el = document.getElementById("rosterLegend");
-  el.innerHTML = ROSTER_LEGEND.map(l =>
-    `<span style="display:inline-flex;align-items:center;gap:6px;margin:4px 14px 4px 0;font-size:12.5px;">
-      <span style="width:14px;height:14px;border-radius:4px;background:${l.color};display:inline-block;border:1px solid rgba(0,0,0,0.1);"></span>${escapeHtml(l.label)}
-    </span>`
-  ).join("");
-}
-
-async function renderRosterGrid(section) {
-  const main = document.getElementById("mainContent");
-  main.innerHTML = `<div class="page-header">
-      <div>
-        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
-        <p>${section.desc}</p>
-      </div>
-    </div>
-    <div class="card" id="rosterLegend" style="padding:14px 22px;"></div>
-    <div id="rosterWrap">불러오는 중...</div>`;
-  renderRosterLegend();
-
-  const branchesSorted = [...state.branches].sort((a, b) => a.name.localeCompare(b.name, "ko"));
-  const wrap = document.getElementById("rosterWrap");
-  if (!branchesSorted.length) { wrap.innerHTML = `<div class="card"><div class="empty-state">등록된 지점이 없습니다.</div></div>`; return; }
-
-  wrap.innerHTML = branchesSorted.map(b => `<div class="card" id="rosterCard_${b.id}" style="overflow:auto;"><div class="empty-state">불러오는 중...</div></div>`).join("");
-  for (const b of branchesSorted) {
-    await loadAndRenderRosterBranch(b);
-  }
-}
-
-async function loadAndRenderRosterBranch(branch) {
-  let data = null;
-  try {
-    const snap = await getDoc(doc(db, "rosterEntries", branch.id));
-    if (snap.exists()) data = snap.data();
-  } catch (err) { /* 문서 없음 */ }
-  renderRosterBranchCard(branch, data);
-}
-
-function findSeedForBranch(branch) {
-  const short = stripBranchSuffix(branch.name);
-  return ROSTER_SEED_DATA.find(s => s.branch === short) || null;
-}
-
-// Firestore는 배열 안에 배열을 직접 저장할 수 없어서, 사람 한 명(행)을 {cells:[...]} 형태로 감싸서 저장합니다.
-function seedToFirestoreShape(seed) {
-  return {
-    years: [...seed.years],
-    people: seed.people.map(row => ({ cells: row.map(c => ({ name: c.name || "", status: c.status || null })) }))
-  };
-}
-
-async function renderRosterBranchCard(branch, data) {
-  const card = document.getElementById(`rosterCard_${branch.id}`);
-  const isLeader = state.profile.role === "leader";
-
-  if (!data) {
-    const seed = findSeedForBranch(branch);
-    card.innerHTML = `<h2 style="margin-bottom:10px;">${escapeHtml(branch.name)}</h2>
-      <div class="empty-state">아직 등록된 인력 이력이 없습니다.
-      ${isLeader && seed ? `<br><button class="btn small" id="seedBtn_${branch.id}" style="margin-top:10px;">2026년까지 기존 자료 불러오기</button>` : ""}
-      ${isLeader ? `<br><button class="btn small secondary" id="newBtn_${branch.id}" style="margin-top:10px;">빈 표로 새로 시작</button>` : ""}
-      </div>`;
-    if (isLeader && seed) {
-      document.getElementById(`seedBtn_${branch.id}`).onclick = async () => {
-        try {
-          await setDoc(doc(db, "rosterEntries", branch.id), seedToFirestoreShape(seed));
-          showToast("불러왔습니다.");
-          loadAndRenderRosterBranch(branch);
-        } catch (err) { alert("불러오는 중 오류: " + err.message); }
-      };
-    }
-    if (isLeader) {
-      document.getElementById(`newBtn_${branch.id}`).onclick = async () => {
-        try {
-          await setDoc(doc(db, "rosterEntries", branch.id), { years: [], people: [] });
-          loadAndRenderRosterBranch(branch);
-        } catch (err) { alert("오류: " + err.message); }
-      };
-    }
-    return;
-  }
-
-  const years = data.years || [];
-  const people = data.people || []; // [{cells:[{name,status}, ...]}, ...]
-  const seed = findSeedForBranch(branch);
-
-  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap;">
-    <h2 style="margin:0;">${escapeHtml(branch.name)}</h2>
-    <div style="display:flex;gap:8px;">
-      ${isLeader && seed ? `<button class="btn small secondary" id="reseedBtn_${branch.id}">기존 자료 다시 불러오기(덮어쓰기)</button>` : ""}
-      ${isLeader ? `<button class="btn small" id="addYearBtn_${branch.id}">+ 연도 추가</button>` : ""}
-    </div>
-  </div>`;
-
-  if (!years.length) {
-    html += `<div class="empty-state">등록된 연도가 없습니다.</div>`;
-  } else {
-    html += `<table class="table-compact" style="width:max-content;min-width:100%;"><thead><tr>
-      ${years.map((y, yi) => `<th>${escapeHtml(y)}${isLeader ? ` <button type="button" class="icon-btn danger" data-del-year="${yi}" style="padding:2px 4px;">✕</button>` : ""}</th>`).join("")}
-      ${isLeader ? `<th></th>` : ""}
-    </tr></thead><tbody>
-      ${people.map((person, pi) => `<tr>
-        ${years.map((y, yi) => {
-          const cell = (person.cells && person.cells[yi]) || { name: "", status: null };
-          const bg = cell.status ? ROSTER_STATUS_COLOR[cell.status] : null;
-          const textColor = cell.status === "지점이동In" ? "#000" : textColorForBg(bg);
-          const style = bg ? `background:${bg};color:${textColor};font-weight:700;border-radius:4px;` : "";
-          return `<td style="${style}${isLeader ? "cursor:pointer;" : ""}" ${isLeader ? `data-cell-edit="${pi}_${yi}"` : ""}>${escapeHtml(cell.name || "")}</td>`;
-        }).join("")}
-        ${isLeader ? `<td><button type="button" class="icon-btn danger" data-del-row="${pi}">✕</button></td>` : ""}
-      </tr>`).join("")}
-    </tbody></table>`;
-  }
-  if (isLeader) html += `<button class="btn small secondary" id="addPersonBtn_${branch.id}" style="margin-top:10px;">+ 인원 추가</button>`;
-
-  card.innerHTML = html;
-  if (!isLeader) return;
-
-  if (document.getElementById(`reseedBtn_${branch.id}`)) {
-    document.getElementById(`reseedBtn_${branch.id}`).onclick = async () => {
-      if (!confirm("지금 표를 지우고 2026년까지의 기존 자료로 덮어쓸까요? (지금까지 직접 수정한 내용이 있다면 사라집니다)")) return;
-      try {
-        await setDoc(doc(db, "rosterEntries", branch.id), seedToFirestoreShape(seed));
-        showToast("불러왔습니다.");
-        loadAndRenderRosterBranch(branch);
-      } catch (err) { alert("불러오는 중 오류: " + err.message); }
-    };
-  }
-  if (document.getElementById(`addYearBtn_${branch.id}`)) {
-    document.getElementById(`addYearBtn_${branch.id}`).onclick = () => {
-      const label = prompt("추가할 연도 이름을 입력하세요 (예: 2027년)");
-      if (!label) return;
-      data.years = data.years || [];
-      data.people = data.people || [];
-      data.years.push(label);
-      data.people.forEach(person => { person.cells = person.cells || []; person.cells.push({ name: "", status: null }); });
-      saveRosterBranch(branch, data);
-    };
-  }
-  if (document.getElementById(`addPersonBtn_${branch.id}`)) {
-    document.getElementById(`addPersonBtn_${branch.id}`).onclick = () => {
-      data.people = data.people || [];
-      data.people.push({ cells: (data.years || []).map(() => ({ name: "", status: null })) });
-      saveRosterBranch(branch, data);
-    };
-  }
-  card.querySelectorAll("[data-del-year]").forEach(btn => {
-    btn.onclick = () => {
-      const yi = parseInt(btn.dataset.delYear, 10);
-      if (!confirm("이 연도 열을 삭제할까요?")) return;
-      data.years.splice(yi, 1);
-      data.people.forEach(person => person.cells && person.cells.splice(yi, 1));
-      saveRosterBranch(branch, data);
-    };
-  });
-  card.querySelectorAll("[data-del-row]").forEach(btn => {
-    btn.onclick = () => {
-      const pi = parseInt(btn.dataset.delRow, 10);
-      if (!confirm("이 사람 행을 삭제할까요?")) return;
-      data.people.splice(pi, 1);
-      saveRosterBranch(branch, data);
-    };
-  });
-  card.querySelectorAll("[data-cell-edit]").forEach(td => {
-    td.onclick = () => {
-      const [pi, yi] = td.dataset.cellEdit.split("_").map(Number);
-      openRosterCellModal(branch, data, pi, yi);
-    };
-  });
-}
-
-async function saveRosterBranch(branch, data) {
-  try {
-    await setDoc(doc(db, "rosterEntries", branch.id), data);
-    renderRosterBranchCard(branch, data);
-  } catch (err) {
-    alert("저장 중 오류: " + err.message);
-  }
-}
-
-function openRosterCellModal(branch, data, personIdx, yearIdx) {
-  const root = document.getElementById("modalRoot");
-  const person = data.people[personIdx] || { cells: [] };
-  const cell = person.cells[yearIdx] || { name: "", status: null };
-  root.innerHTML = `<div class="modal-bg" id="modalBg">
-    <div class="modal">
-      <h3>${escapeHtml(branch.name)} · ${escapeHtml(data.years[yearIdx] || "")}</h3>
-      <form id="rosterCellForm">
-        <div class="field"><label>이름</label><input type="text" id="rcName" value="${escapeHtml(cell.name || "")}"></div>
-        <div class="field"><label>상태</label>
-          <select id="rcStatus">
-            <option value="">없음(빈 칸)</option>
-            ${ROSTER_LEGEND.map(l => `<option value="${l.key}" ${cell.status === l.key ? "selected" : ""}>${escapeHtml(l.label)}</option>`).join("")}
-          </select>
-        </div>
-        <div class="grid-2" style="margin-top:10px;">
-          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
-          <button type="submit" class="btn">저장</button>
-        </div>
-      </form>
-    </div></div>`;
-  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
-  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
-  document.getElementById("rosterCellForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = document.getElementById("rcName").value.trim();
-    const status = document.getElementById("rcStatus").value || null;
-    if (!data.people[personIdx].cells) data.people[personIdx].cells = [];
-    data.people[personIdx].cells[yearIdx] = { name, status };
-    root.innerHTML = "";
-    await saveRosterBranch(branch, data);
-  });
 }
 
 /* ===================== 등록/수정 모달 ===================== */
