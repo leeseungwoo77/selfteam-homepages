@@ -178,6 +178,7 @@ function generateTimeSlots() {
 }
 const SCHEDULE_TIME_SLOTS = generateTimeSlots();
 const SCHEDULE_NOTE_ROWS = ["에듀본사", "전농", "돈암", "행당", "별내", "다산"];
+const SCHEDULE_ROW_ORDER = ["location", ...SCHEDULE_NOTE_ROWS.map(l => "note_" + l), ...SCHEDULE_TIME_SLOTS.map(s => "time_" + s)];
 
 const scheduleViewState = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
 
@@ -241,17 +242,20 @@ async function renderMonthlySchedule(section) {
 
   function getCellValue(dateStr, rowKey) {
     const entry = byDate[dateStr];
-    return (entry && entry.cells && entry.cells[rowKey]) || "";
+    const raw = entry && entry.cells && entry.cells[rowKey];
+    if (!raw) return { text: "", color: null };
+    if (typeof raw === "string") return { text: raw, color: null }; // 예전 방식(문자열만 저장) 호환
+    return { text: raw.text || "", color: raw.color || null };
   }
 
   function cellHtml(dateStr, rowKey) {
-    const val = getCellValue(dateStr, rowKey);
-    const bg = val ? matchLocationColor(val) : null;
+    const cell = getCellValue(dateStr, rowKey);
+    const bg = cell.color || (cell.text ? matchLocationColor(cell.text) : null);
     const colorStyle = bg ? `background:${bg};color:#fff;font-weight:700;border-radius:4px;` : "";
     if (canEdit) {
-      return `<td class="sched-cell" data-date="${dateStr}" data-row="${rowKey}" contenteditable="true" style="${cellBase}${colorStyle}outline:none;cursor:text;">${escapeHtml(val)}</td>`;
+      return `<td class="sched-cell" data-date="${dateStr}" data-row="${rowKey}" contenteditable="true" style="${cellBase}${colorStyle}outline:none;cursor:text;">${escapeHtml(cell.text)}</td>`;
     }
-    return `<td style="${cellBase}${colorStyle}">${escapeHtml(val)}</td>`;
+    return `<td style="${cellBase}${colorStyle}">${escapeHtml(cell.text)}</td>`;
   }
 
   let html = `<table class="table-compact" style="width:max-content;"><thead>
@@ -305,20 +309,115 @@ async function renderMonthlySchedule(section) {
         try {
           await setDoc(doc(db, "scheduleEntries", dateStr), {
             date: dateStr,
-            [`cells.${rowKey}`]: value
+            [`cells.${rowKey}`]: { text: value, color: null }
           }, { merge: true });
           if (!byDate[dateStr]) byDate[dateStr] = { date: dateStr, cells: {} };
           if (!byDate[dateStr].cells) byDate[dateStr].cells = {};
-          byDate[dateStr].cells[rowKey] = value;
+          byDate[dateStr].cells[rowKey] = { text: value, color: null };
           const bg = value ? matchLocationColor(value) : null;
           td.style.cssText = `${cellBase}${bg ? `background:${bg};color:#fff;font-weight:700;border-radius:4px;` : ""}outline:none;cursor:text;`;
         } catch (err) {
           alert("저장 중 오류: " + err.message);
         }
       });
+      td.addEventListener("paste", async (e) => {
+        e.preventDefault();
+        const grid = parseScheduleClipboard(e.clipboardData);
+        if (!grid.length) return;
+
+        const startRowIdx = SCHEDULE_ROW_ORDER.indexOf(td.dataset.row);
+        const startDay = parseInt(td.dataset.date.slice(-2), 10);
+        const startDateIdx = dates.indexOf(startDay);
+        if (startRowIdx === -1 || startDateIdx === -1) return;
+
+        const updatesByDate = {};
+        grid.forEach((row, ri) => {
+          row.forEach((cell, ci) => {
+            if (!cell) return;
+            const rowIdx = startRowIdx + ri;
+            const dateIdx = startDateIdx + ci;
+            if (rowIdx >= SCHEDULE_ROW_ORDER.length || dateIdx >= dates.length) return;
+            const rowKey = SCHEDULE_ROW_ORDER[rowIdx];
+            const dStr = ymd(year, month, dates[dateIdx]);
+            if (!updatesByDate[dStr]) updatesByDate[dStr] = {};
+            updatesByDate[dStr][`cells.${rowKey}`] = { text: cell.text, color: cell.color };
+            if (!byDate[dStr]) byDate[dStr] = { date: dStr, cells: {} };
+            if (!byDate[dStr].cells) byDate[dStr].cells = {};
+            byDate[dStr].cells[rowKey] = { text: cell.text, color: cell.color };
+          });
+        });
+
+        try {
+          await Promise.all(Object.keys(updatesByDate).map(dStr =>
+            setDoc(doc(db, "scheduleEntries", dStr), { date: dStr, ...updatesByDate[dStr] }, { merge: true })
+          ));
+          showToast("붙여넣었습니다.");
+          renderMonthlySchedule(section);
+        } catch (err) {
+          alert("붙여넣기 저장 중 오류: " + err.message);
+        }
+      });
     });
   }
 }
+
+function rgbStringToHex(rgbStr) {
+  if (!rgbStr) return null;
+  const m = rgbStr.match(/\d+/g);
+  if (!m || m.length < 3) return null;
+  const [r, g, b] = m.map(Number);
+  if (r > 240 && g > 240 && b > 240) return null; // 흰색/거의 흰색은 색 없음 처리
+  return `#${[r, g, b].map(x => x.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function parseScheduleClipboard(clipboardData) {
+  const html = clipboardData.getData("text/html");
+  if (html) {
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    const rows = parsed.querySelectorAll("tr");
+    if (rows.length) return expandMergedGrid(Array.from(rows));
+  }
+  const text = clipboardData.getData("text/plain");
+  if (text) {
+    return text.split(/\r?\n/).filter(r => r.length).map(row => row.split("\t").map(t => ({ text: t.trim(), color: null })));
+  }
+  return [];
+}
+
+// 구글 시트에서 병합된 셀(colspan/rowspan)을 실제 칸 수만큼 값을 복제해서 채워 넣는다.
+function expandMergedGrid(rowEls) {
+  const grid = [];
+  const rowSpanTracker = {}; // colIndex -> { remaining, value }
+  rowEls.forEach((tr, rIdx) => {
+    grid[rIdx] = [];
+    const cells = Array.from(tr.querySelectorAll("td,th"));
+    let cellPtr = 0;
+    let colIdx = 0;
+    while (cellPtr < cells.length || rowSpanTracker[colIdx]) {
+      if (rowSpanTracker[colIdx] && rowSpanTracker[colIdx].remaining > 0) {
+        grid[rIdx][colIdx] = rowSpanTracker[colIdx].value;
+        rowSpanTracker[colIdx].remaining--;
+        if (rowSpanTracker[colIdx].remaining === 0) delete rowSpanTracker[colIdx];
+        colIdx++;
+        continue;
+      }
+      if (cellPtr >= cells.length) break;
+      const cell = cells[cellPtr++];
+      const colspan = parseInt(cell.getAttribute("colspan") || "1", 10) || 1;
+      const rowspan = parseInt(cell.getAttribute("rowspan") || "1", 10) || 1;
+      const value = { text: cell.textContent.trim(), color: rgbStringToHex(cell.style.backgroundColor) };
+      for (let cs = 0; cs < colspan; cs++) {
+        while (rowSpanTracker[colIdx] && rowSpanTracker[colIdx].remaining > 0) colIdx++; // 이미 예약된 칸은 건너뜀
+        grid[rIdx][colIdx] = value;
+        if (rowspan > 1) rowSpanTracker[colIdx] = { remaining: rowspan - 1, value };
+        colIdx++;
+      }
+    }
+  });
+  return grid;
+}
+
+
 
 /* ===================== 전역 상태 ===================== */
 const state = { user:null, profile:null, branches:[], customFolders:[], menuOverrides:{}, currentSection:"schedule", branchFilter:{}, navExpanded:{} };
