@@ -192,13 +192,16 @@ const SCHEDULE_KEYWORD_RULES = [
   { word: "이동", bg: "#F0E4C8", color: "#000" },
   { word: "휴무", bg: "#FFFFFF", color: "#E03C3C" }
 ];
-function computeScheduleCellStyle(text, explicitColor) {
+function computeScheduleCellStyle(text, explicitColor, explicitTextColor) {
+  if (explicitColor || explicitTextColor) {
+    return { bg: explicitColor || null, color: explicitTextColor || (explicitColor ? "#fff" : "inherit") };
+  }
   if (text) {
     for (const rule of SCHEDULE_KEYWORD_RULES) {
       if (text.includes(rule.word)) return { bg: rule.bg, color: rule.color };
     }
   }
-  const bg = explicitColor || (text ? matchLocationColor(text) : null);
+  const bg = text ? matchLocationColor(text) : null;
   return { bg, color: bg ? "#fff" : "inherit" };
 }
 
@@ -232,6 +235,13 @@ async function renderMonthlySchedule(section) {
         <button class="icon-btn" id="nextMonthBtn" style="font-size:18px;">›</button>
       </div>
     </div>
+    ${canEdit ? `<div class="card" style="padding:12px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:12px;font-weight:700;color:var(--text-muted);">선택한 칸 서식:</span>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;">배경색 <input type="color" id="cellBgPicker" value="#ffffff"></label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;">글자색 <input type="color" id="cellTextPicker" value="#000000"></label>
+      <button class="btn small secondary" id="cellClearFormatBtn" type="button">자동 서식으로 되돌리기</button>
+      <span id="activeCellHint" style="font-size:11px;color:var(--text-muted);">먼저 표에서 칸을 클릭한 뒤 색을 골라주세요.</span>
+    </div>` : ""}
     <div class="card" style="overflow:auto;max-height:calc(100vh - 190px);"><div id="scheduleCalendar">불러오는 중...</div></div>`;
 
   document.getElementById("prevMonthBtn").onclick = () => {
@@ -264,14 +274,14 @@ async function renderMonthlySchedule(section) {
   function getCellValue(dateStr, rowKey) {
     const entry = byDate[dateStr];
     const raw = entry && entry.cells && entry.cells[rowKey];
-    if (!raw) return { text: "", color: null };
-    if (typeof raw === "string") return { text: raw, color: null }; // 예전 방식(문자열만 저장) 호환
-    return { text: raw.text || "", color: raw.color || null };
+    if (!raw) return { text: "", color: null, textColor: null };
+    if (typeof raw === "string") return { text: raw, color: null, textColor: null }; // 예전 방식(문자열만 저장) 호환
+    return { text: raw.text || "", color: raw.color || null, textColor: raw.textColor || null };
   }
 
   function cellHtml(dateStr, rowKey, extraStyle) {
     const cell = getCellValue(dateStr, rowKey);
-    const { bg, color } = computeScheduleCellStyle(cell.text, cell.color);
+    const { bg, color } = computeScheduleCellStyle(cell.text, cell.color, cell.textColor);
     const bgStyle = bg ? `background:${bg};color:${color};font-weight:700;` : "";
     const extra = extraStyle || "";
     if (canEdit) {
@@ -317,8 +327,14 @@ async function renderMonthlySchedule(section) {
   html += `</tbody></table>`;
   document.getElementById("scheduleCalendar").innerHTML = html;
 
+  let activeCellInput = null;
+
   if (canEdit) {
     document.querySelectorAll(".sched-cell").forEach(input => {
+      input.addEventListener("focus", () => {
+        activeCellInput = input;
+        document.getElementById("activeCellHint").textContent = `${input.dataset.date} 칸 선택됨`;
+      });
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") { e.preventDefault(); input.blur(); return; }
         const arrowMap = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
@@ -334,9 +350,10 @@ async function renderMonthlySchedule(section) {
         try {
           if (!byDate[dateStr]) byDate[dateStr] = { date: dateStr, cells: {} };
           if (!byDate[dateStr].cells) byDate[dateStr].cells = {};
-          byDate[dateStr].cells[rowKey] = { text: value, color: null };
+          const existing = byDate[dateStr].cells[rowKey] || {};
+          byDate[dateStr].cells[rowKey] = { text: value, color: existing.color || null, textColor: existing.textColor || null };
           await setDoc(doc(db, "scheduleEntries", dateStr), { date: dateStr, cells: byDate[dateStr].cells });
-          const { bg, color } = computeScheduleCellStyle(value, null);
+          const { bg, color } = computeScheduleCellStyle(value, existing.color || null, existing.textColor || null);
           const td = input.closest("td");
           td.style.cssText = `${cellBase}${bg ? `background:${bg};color:${color};font-weight:700;` : ""}padding:0;border-radius:4px;`;
         } catch (err) {
@@ -380,6 +397,41 @@ async function renderMonthlySchedule(section) {
         }
       });
     });
+
+    async function applyCellFormat(bg, textColor) {
+      if (!activeCellInput) { alert("먼저 표에서 칸을 클릭해주세요."); return; }
+      const dateStr = activeCellInput.dataset.date;
+      const rowKey = activeCellInput.dataset.row;
+      if (!byDate[dateStr]) byDate[dateStr] = { date: dateStr, cells: {} };
+      if (!byDate[dateStr].cells) byDate[dateStr].cells = {};
+      const existing = byDate[dateStr].cells[rowKey] || {};
+      const text = activeCellInput.value.trim();
+      byDate[dateStr].cells[rowKey] = { text, color: bg, textColor: textColor };
+      try {
+        await setDoc(doc(db, "scheduleEntries", dateStr), { date: dateStr, cells: byDate[dateStr].cells });
+        const { bg: finalBg, color: finalColor } = computeScheduleCellStyle(text, bg, textColor);
+        const td = activeCellInput.closest("td");
+        td.style.cssText = `${cellBase}${finalBg ? `background:${finalBg};color:${finalColor};font-weight:700;` : ""}padding:0;border-radius:4px;`;
+      } catch (err) {
+        alert("저장 중 오류: " + err.message);
+      }
+    }
+
+    const bgPicker = document.getElementById("cellBgPicker");
+    const textPicker = document.getElementById("cellTextPicker");
+    bgPicker.addEventListener("change", () => {
+      const dateStr = activeCellInput?.dataset.date;
+      const rowKey = activeCellInput?.dataset.row;
+      const existingTextColor = (dateStr && byDate[dateStr]?.cells?.[rowKey]?.textColor) || textPicker.value;
+      applyCellFormat(bgPicker.value, existingTextColor);
+    });
+    textPicker.addEventListener("change", () => {
+      const dateStr = activeCellInput?.dataset.date;
+      const rowKey = activeCellInput?.dataset.row;
+      const existingBg = (dateStr && byDate[dateStr]?.cells?.[rowKey]?.color) || bgPicker.value;
+      applyCellFormat(existingBg, textPicker.value);
+    });
+    document.getElementById("cellClearFormatBtn").onclick = () => applyCellFormat(null, null);
   }
 }
 
