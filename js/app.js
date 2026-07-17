@@ -177,7 +177,7 @@ function generateTimeSlots() {
   return slots; // 10:00 ~ 21:30, 30분 단위
 }
 const SCHEDULE_TIME_SLOTS = generateTimeSlots();
-const SCHEDULE_NOTE_ROWS = ["에듀본사", "전농", "돈암", "행당", "별내", "다산"];
+const SCHEDULE_NOTE_ROWS = ["에듀본사", "상상", "전농", "돈암", "행당", "별내", "다산"];
 const SCHEDULE_ROW_ORDER = ["location", ...SCHEDULE_NOTE_ROWS.map(l => "note_" + l), ...SCHEDULE_TIME_SLOTS.map(s => "time_" + s)];
 
 const scheduleViewState = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
@@ -269,16 +269,17 @@ async function renderMonthlySchedule(section) {
     return { text: raw.text || "", color: raw.color || null };
   }
 
-  function cellHtml(dateStr, rowKey) {
+  function cellHtml(dateStr, rowKey, extraStyle) {
     const cell = getCellValue(dateStr, rowKey);
     const { bg, color } = computeScheduleCellStyle(cell.text, cell.color);
     const bgStyle = bg ? `background:${bg};color:${color};font-weight:700;` : "";
+    const extra = extraStyle || "";
     if (canEdit) {
-      return `<td style="${cellBase}${bgStyle}padding:0;border-radius:4px;">
+      return `<td style="${cellBase}${bgStyle}${extra}padding:0;border-radius:4px;">
         <input type="text" class="sched-cell" data-date="${dateStr}" data-row="${rowKey}" value="${escapeHtml(cell.text)}"
           style="width:80px;box-sizing:border-box;border:none;background:transparent;color:inherit;font-weight:inherit;text-align:center;outline:none;padding:0;font-family:inherit;font-size:inherit;" size="1"></td>`;
     }
-    return `<td style="${cellBase}${bgStyle}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
+    return `<td style="${cellBase}${bgStyle}${extra}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
 
   let html = `<table class="table-compact" style="width:max-content;"><thead>
@@ -306,9 +307,10 @@ async function renderMonthlySchedule(section) {
   });
 
   // 30분 단위 시간표 행
-  SCHEDULE_TIME_SLOTS.forEach(slot => {
-    html += `<tr><td style="${leftLabelStyle}">${slot}</td>`;
-    dates.forEach(d => { html += cellHtml(ymd(year, month, d), "time_" + slot); });
+  SCHEDULE_TIME_SLOTS.forEach((slot, si) => {
+    const dividerStyle = si === 0 ? "border-top:3px solid var(--text-main);" : "";
+    html += `<tr><td style="${leftLabelStyle}${dividerStyle}">${slot}</td>`;
+    dates.forEach(d => { html += cellHtml(ymd(year, month, d), "time_" + slot, dividerStyle); });
     html += `</tr>`;
   });
 
