@@ -323,6 +323,12 @@ async function renderMonthlySchedule(section) {
       td.addEventListener("paste", async (e) => {
         e.preventDefault();
         const grid = parseScheduleClipboard(e.clipboardData);
+        if (!grid.length) {
+          const html = e.clipboardData?.getData("text/html") || "";
+          const text = e.clipboardData?.getData("text/plain") || "";
+          alert("붙여넣을 내용을 읽지 못했습니다.\n(html 길이: " + html.length + ", text 길이: " + text.length + ")\n\ntext 내용 미리보기:\n" + text.slice(0, 200));
+          return;
+        }
         if (!grid.length) return;
 
         const startRowIdx = SCHEDULE_ROW_ORDER.indexOf(td.dataset.row);
