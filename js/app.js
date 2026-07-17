@@ -568,6 +568,8 @@ function folderToSection(folder) {
     scope: "custom",
     folderId: folder.id,
     writable: folder.writable || "leader",
+    visibility: folder.visibility || "all",
+    leaderOnly: folder.visibility === "leader",
     template: folder.template || "standard",
     order: folder.order ?? 1000,
     desc: folder.desc || ""
@@ -605,7 +607,7 @@ function buildNav() {
     .map((s, i) => ({ ...s, order: s.order ?? i }))
     .filter(s => !s.leaderOnly || canViewAllRole())
     .map(withOverride);
-  const allFolders = state.customFolders.map(f => withOverride(folderToSection(f)));
+  const allFolders = state.customFolders.map(f => withOverride(folderToSection(f))).filter(s => !s.leaderOnly || canViewAllRole());
   const allItems = [...allBuiltIn, ...allFolders];
   GROUP_ORDER.forEach(group => {
     const items = allItems.filter(s => s.group === group).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -1936,7 +1938,19 @@ function openMenuEditModal(item) {
             <option value="neutral" ${item.color === "neutral" ? "selected" : ""}>회색(기본)</option>
           </select>
         </div>
-        ${item.isCustom ? `<div class="field"><label>양식 종류</label>
+        ${item.isCustom ? `<div class="field"><label>작성 권한</label>
+          <select id="menuEditWritable">
+            <option value="leader" ${item.writable !== "all" ? "selected" : ""}>팀장만 작성</option>
+            <option value="all" ${item.writable === "all" ? "selected" : ""}>전원 작성 가능</option>
+          </select>
+        </div>
+        <div class="field"><label>열람 권한</label>
+          <select id="menuEditVisibility">
+            <option value="all" ${item.visibility !== "leader" ? "selected" : ""}>전체 열람 가능</option>
+            <option value="leader" ${item.visibility === "leader" ? "selected" : ""}>팀장만 열람 가능</option>
+          </select>
+        </div>
+        <div class="field"><label>양식 종류</label>
           <select id="menuEditTemplate">
             <option value="standard" ${item.template !== "okr" ? "selected" : ""}>일반 (제목 + 내용 + 이미지)</option>
             <option value="okr" ${item.template === "okr" ? "selected" : ""}>OKR (시즌 · Objective · KR · KT)</option>
@@ -1959,7 +1973,9 @@ function openMenuEditModal(item) {
     if (!label) return;
     if (item.isCustom) {
       const template = document.getElementById("menuEditTemplate").value;
-      await updateDoc(doc(db, "customFolders", item.folderDocId), { label, group, color, template });
+      const writable = document.getElementById("menuEditWritable").value;
+      const visibility = document.getElementById("menuEditVisibility").value;
+      await updateDoc(doc(db, "customFolders", item.folderDocId), { label, group, color, template, writable, visibility });
       await loadCustomFolders();
     } else {
       await setDoc(doc(db, "menuOverrides", item.key), { label, group, color });
@@ -2009,6 +2025,12 @@ async function renderAdmin() {
           <select id="newFolderWritable">
             <option value="leader">팀장만 작성</option>
             <option value="all">전원 작성 가능</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0;"><label>열람 권한</label>
+          <select id="newFolderVisibility">
+            <option value="all">전체 열람 가능</option>
+            <option value="leader">팀장만 열람 가능</option>
           </select>
         </div>
         <div class="field" style="margin:0;"><label>양식 종류</label>
@@ -2064,8 +2086,9 @@ async function renderAdmin() {
     const group = document.getElementById("newFolderGroup").value;
     const color = document.getElementById("newFolderColor").value;
     const writable = document.getElementById("newFolderWritable").value;
+    const visibility = document.getElementById("newFolderVisibility").value;
     const template = document.getElementById("newFolderTemplate").value;
-    await addDoc(collection(db, "customFolders"), { label, group, color, writable, template, createdAt: new Date().toISOString() });
+    await addDoc(collection(db, "customFolders"), { label, group, color, writable, visibility, template, createdAt: new Date().toISOString() });
     await loadCustomFolders();
     showToast("폴더가 생성되었습니다.");
     buildNav();

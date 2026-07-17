@@ -33,7 +33,10 @@ service cloud.firestore {
     match /menuOverrides/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
     // 폴더 안의 게시물 - 팀장은 항상 가능, 폴더가 "전원 작성 가능"이면 로그인한 누구나 작성 가능
     match /folderEntries/{id} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (
+        canViewAll() ||
+        get(/databases/$(database)/documents/customFolders/$(resource.data.folderId)).data.get('visibility', 'all') != 'leader'
+      );
       allow create: if isSignedIn() && (
         isLeader() ||
         get(/databases/$(database)/documents/customFolders/$(request.resource.data.folderId)).data.writable == 'all'
