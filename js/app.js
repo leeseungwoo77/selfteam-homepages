@@ -184,6 +184,11 @@ const scheduleViewState = { year: new Date().getFullYear(), month: new Date().ge
 
 function scheduleRowKey(kind) { return kind; } // "location" | "note_에듀본사" | "time_10:00" 등
 
+function computeScheduleCellBg(text, explicitColor) {
+  if (text && text.includes("연차")) return "#000000";
+  return explicitColor || (text ? matchLocationColor(text) : null);
+}
+
 function findAdjacentCell(input, direction) {
   const td = input.closest("td");
   if (!td) return null;
@@ -240,7 +245,7 @@ async function renderMonthlySchedule(section) {
   const dates = [];
   for (let d = 1; d <= nDays; d++) dates.push(d);
 
-  const cellBase = "white-space:nowrap;min-width:80px;text-align:center;border-right:1px solid var(--border);";
+  const cellBase = "white-space:nowrap;min-width:40px;text-align:center;border-right:1px solid var(--border);";
   const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;padding:5px 10px;border-right:1px solid var(--border);";
 
   function getCellValue(dateStr, rowKey) {
@@ -253,7 +258,7 @@ async function renderMonthlySchedule(section) {
 
   function cellHtml(dateStr, rowKey) {
     const cell = getCellValue(dateStr, rowKey);
-    const bg = cell.color || (cell.text ? matchLocationColor(cell.text) : null);
+    const bg = computeScheduleCellBg(cell.text, cell.color);
     const bgStyle = bg ? `background:${bg};color:#fff;font-weight:700;` : "";
     if (canEdit) {
       return `<td style="${cellBase}${bgStyle}padding:0;border-radius:4px;">
@@ -319,7 +324,7 @@ async function renderMonthlySchedule(section) {
           if (!byDate[dateStr]) byDate[dateStr] = { date: dateStr, cells: {} };
           if (!byDate[dateStr].cells) byDate[dateStr].cells = {};
           byDate[dateStr].cells[rowKey] = { text: value, color: null };
-          const bg = value ? matchLocationColor(value) : null;
+          const bg = computeScheduleCellBg(value, null);
           const td = input.closest("td");
           td.style.cssText = `${cellBase}${bg ? `background:${bg};color:#fff;font-weight:700;` : ""}padding:0;border-radius:4px;`;
         } catch (err) {
