@@ -184,17 +184,20 @@ const scheduleViewState = { year: new Date().getFullYear(), month: new Date().ge
 
 function scheduleRowKey(kind) { return kind; } // "location" | "note_에듀본사" | "time_10:00" 등
 
-function findAdjacentCell(td, direction) {
+function findAdjacentCell(input, direction) {
+  const td = input.closest("td");
+  if (!td) return null;
   const tr = td.parentElement;
   const colIndex = td.cellIndex;
+  let targetTd = null;
   if (direction === "up" || direction === "down") {
     const targetRow = direction === "up" ? tr.previousElementSibling : tr.nextElementSibling;
     if (!targetRow) return null;
-    const cell = targetRow.cells[colIndex];
-    return cell && cell.classList.contains("sched-cell") ? cell : null;
+    targetTd = targetRow.cells[colIndex];
+  } else {
+    targetTd = direction === "left" ? td.previousElementSibling : td.nextElementSibling;
   }
-  const cell = direction === "left" ? td.previousElementSibling : td.nextElementSibling;
-  return cell && cell.classList.contains("sched-cell") ? cell : null;
+  return targetTd ? targetTd.querySelector(".sched-cell") : null;
 }
 
 async function renderMonthlySchedule(section) {
@@ -237,7 +240,7 @@ async function renderMonthlySchedule(section) {
   const dates = [];
   for (let d = 1; d <= nDays; d++) dates.push(d);
 
-  const cellBase = "white-space:nowrap;padding:5px 10px;min-width:80px;text-align:center;border-right:1px solid var(--border);";
+  const cellBase = "white-space:nowrap;min-width:80px;text-align:center;border-right:1px solid var(--border);";
   const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;padding:5px 10px;border-right:1px solid var(--border);";
 
   function getCellValue(dateStr, rowKey) {
@@ -251,11 +254,13 @@ async function renderMonthlySchedule(section) {
   function cellHtml(dateStr, rowKey) {
     const cell = getCellValue(dateStr, rowKey);
     const bg = cell.color || (cell.text ? matchLocationColor(cell.text) : null);
-    const colorStyle = bg ? `background:${bg};color:#fff;font-weight:700;border-radius:4px;` : "";
+    const bgStyle = bg ? `background:${bg};color:#fff;font-weight:700;` : "";
     if (canEdit) {
-      return `<td class="sched-cell" data-date="${dateStr}" data-row="${rowKey}" contenteditable="true" style="${cellBase}${colorStyle}outline:none;cursor:text;">${escapeHtml(cell.text)}</td>`;
+      return `<td style="${cellBase}${bgStyle}padding:0;border-radius:4px;">
+        <input type="text" class="sched-cell" data-date="${dateStr}" data-row="${rowKey}" value="${escapeHtml(cell.text)}"
+          style="width:100%;box-sizing:border-box;border:none;background:transparent;color:inherit;font-weight:inherit;text-align:center;outline:none;padding:5px 10px;font-family:inherit;font-size:inherit;"></td>`;
     }
-    return `<td style="${cellBase}${colorStyle}">${escapeHtml(cell.text)}</td>`;
+    return `<td style="${cellBase}${bgStyle}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
 
   let html = `<table class="table-compact" style="width:max-content;"><thead>
@@ -293,19 +298,19 @@ async function renderMonthlySchedule(section) {
   document.getElementById("scheduleCalendar").innerHTML = html;
 
   if (canEdit) {
-    document.querySelectorAll(".sched-cell").forEach(td => {
-      td.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); td.blur(); return; }
+    document.querySelectorAll(".sched-cell").forEach(input => {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); input.blur(); return; }
         const arrowMap = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
         if (arrowMap[e.key]) {
-          const target = findAdjacentCell(td, arrowMap[e.key]);
-          if (target) { e.preventDefault(); target.focus(); }
+          const target = findAdjacentCell(input, arrowMap[e.key]);
+          if (target) { e.preventDefault(); target.focus(); target.select(); }
         }
       });
-      td.addEventListener("blur", async () => {
-        const dateStr = td.dataset.date;
-        const rowKey = td.dataset.row;
-        const value = td.textContent.trim();
+      input.addEventListener("blur", async () => {
+        const dateStr = input.dataset.date;
+        const rowKey = input.dataset.row;
+        const value = input.value.trim();
         try {
           await setDoc(doc(db, "scheduleEntries", dateStr), {
             date: dateStr,
@@ -315,24 +320,19 @@ async function renderMonthlySchedule(section) {
           if (!byDate[dateStr].cells) byDate[dateStr].cells = {};
           byDate[dateStr].cells[rowKey] = { text: value, color: null };
           const bg = value ? matchLocationColor(value) : null;
-          td.style.cssText = `${cellBase}${bg ? `background:${bg};color:#fff;font-weight:700;border-radius:4px;` : ""}outline:none;cursor:text;`;
+          const td = input.closest("td");
+          td.style.cssText = `${cellBase}${bg ? `background:${bg};color:#fff;font-weight:700;` : ""}padding:0;border-radius:4px;`;
         } catch (err) {
           alert("저장 중 오류: " + err.message);
         }
       });
-      td.addEventListener("paste", async (e) => {
+      input.addEventListener("paste", async (e) => {
         e.preventDefault();
         const grid = parseScheduleClipboard(e.clipboardData);
-        if (!grid.length) {
-          const html = e.clipboardData?.getData("text/html") || "";
-          const text = e.clipboardData?.getData("text/plain") || "";
-          alert("붙여넣을 내용을 읽지 못했습니다.\n(html 길이: " + html.length + ", text 길이: " + text.length + ")\n\ntext 내용 미리보기:\n" + text.slice(0, 200));
-          return;
-        }
         if (!grid.length) return;
 
-        const startRowIdx = SCHEDULE_ROW_ORDER.indexOf(td.dataset.row);
-        const startDay = parseInt(td.dataset.date.slice(-2), 10);
+        const startRowIdx = SCHEDULE_ROW_ORDER.indexOf(input.dataset.row);
+        const startDay = parseInt(input.dataset.date.slice(-2), 10);
         const startDateIdx = dates.indexOf(startDay);
         if (startRowIdx === -1 || startDateIdx === -1) return;
 
