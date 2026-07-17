@@ -330,13 +330,10 @@ async function renderMonthlySchedule(section) {
         const rowKey = input.dataset.row;
         const value = input.value.trim();
         try {
-          await setDoc(doc(db, "scheduleEntries", dateStr), {
-            date: dateStr,
-            [`cells.${rowKey}`]: { text: value, color: null }
-          }, { merge: true });
           if (!byDate[dateStr]) byDate[dateStr] = { date: dateStr, cells: {} };
           if (!byDate[dateStr].cells) byDate[dateStr].cells = {};
           byDate[dateStr].cells[rowKey] = { text: value, color: null };
+          await setDoc(doc(db, "scheduleEntries", dateStr), { date: dateStr, cells: byDate[dateStr].cells });
           const { bg, color } = computeScheduleCellStyle(value, null);
           const td = input.closest("td");
           td.style.cssText = `${cellBase}${bg ? `background:${bg};color:${color};font-weight:700;` : ""}padding:0;border-radius:4px;`;
@@ -354,7 +351,7 @@ async function renderMonthlySchedule(section) {
         const startDateIdx = dates.indexOf(startDay);
         if (startRowIdx === -1 || startDateIdx === -1) return;
 
-        const updatesByDate = {};
+        const touchedDates = new Set();
         grid.forEach((row, ri) => {
           row.forEach((cell, ci) => {
             if (!cell) return;
@@ -363,17 +360,16 @@ async function renderMonthlySchedule(section) {
             if (rowIdx >= SCHEDULE_ROW_ORDER.length || dateIdx >= dates.length) return;
             const rowKey = SCHEDULE_ROW_ORDER[rowIdx];
             const dStr = ymd(year, month, dates[dateIdx]);
-            if (!updatesByDate[dStr]) updatesByDate[dStr] = {};
-            updatesByDate[dStr][`cells.${rowKey}`] = { text: cell.text, color: cell.color };
             if (!byDate[dStr]) byDate[dStr] = { date: dStr, cells: {} };
             if (!byDate[dStr].cells) byDate[dStr].cells = {};
             byDate[dStr].cells[rowKey] = { text: cell.text, color: cell.color };
+            touchedDates.add(dStr);
           });
         });
 
         try {
-          await Promise.all(Object.keys(updatesByDate).map(dStr =>
-            setDoc(doc(db, "scheduleEntries", dStr), { date: dStr, ...updatesByDate[dStr] }, { merge: true })
+          await Promise.all(Array.from(touchedDates).map(dStr =>
+            setDoc(doc(db, "scheduleEntries", dStr), { date: dStr, cells: byDate[dStr].cells })
           ));
           showToast("붙여넣었습니다.");
           renderMonthlySchedule(section);
