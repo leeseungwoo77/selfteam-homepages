@@ -59,6 +59,8 @@ service cloud.firestore {
 
     // 성과 지표 - 구글 시트 탭(연도) 등록 정보. 팀장만 추가/삭제, 로그인한 누구나 조회
     match /evalSheets/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
+    // 여러 화면에 붙는 단순 링크 버튼(예: 손익계산서) - 팀장만 수정
+    match /siteLinks/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
 
     // 지점 인적 구성 - 팀장만 수정, 로그인한 누구나 조회
     match /rosterEntries/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }

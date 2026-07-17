@@ -898,14 +898,46 @@ async function renderLogCards(section) {
 /* ===================== 지점 성과 지표 - 평가지표 구글 시트 임베드 (연도 탭 등록) ===================== */
 const EVAL_SPREADSHEET_ID = "1TA3ObFLBQGb9dmKlOEL4XxPmE308ifyOPhxzEzAe-I8";
 
+function openSimpleLinkModal(title, currentUrl, onSave) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>${escapeHtml(title)}</h3>
+      <form id="simpleLinkForm">
+        <div class="field"><label>URL</label><input type="url" id="simpleLinkUrl" placeholder="https://..." value="${escapeHtml(currentUrl || "")}"></div>
+        <div class="grid-2" style="margin-top:10px;">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="submit" class="btn">저장</button>
+        </div>
+      </form>
+    </div></div>`;
+  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  document.getElementById("simpleLinkForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const url = document.getElementById("simpleLinkUrl").value.trim();
+    root.innerHTML = "";
+    await onSave(url);
+  });
+}
+
 async function renderEvalSheet(section) {
   const main = document.getElementById("mainContent");
+  let plUrl = "";
+  try {
+    const plDoc = await getDoc(doc(db, "siteLinks", "plStatement"));
+    if (plDoc.exists()) plUrl = plDoc.data().url || "";
+  } catch (err) { /* 무시 */ }
+
   main.innerHTML = `<div class="page-header">
       <div>
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
         <p>${section.desc}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
+        ${plUrl
+          ? `<a href="${escapeHtml(plUrl)}" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">손익계산서</a>${state.profile.role === "leader" ? `<button class="icon-btn" id="editPlLinkBtn" type="button">수정</button>` : ""}`
+          : (state.profile.role === "leader" ? `<button class="btn small secondary" id="editPlLinkBtn" type="button">+ 손익계산서 링크 설정</button>` : "")}
         <a href="https://docs.google.com/spreadsheets/d/${EVAL_SPREADSHEET_ID}/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">원본 시트 열기</a>
         <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
         <select id="evalYearSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
@@ -923,6 +955,20 @@ async function renderEvalSheet(section) {
       <div id="evalSheetList" style="margin-top:14px;"></div>
     </div>` : ""}
     <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="evalSheetWrap">불러오는 중...</div></div>`;
+
+  if (document.getElementById("editPlLinkBtn")) {
+    document.getElementById("editPlLinkBtn").onclick = () => {
+      openSimpleLinkModal("손익계산서 링크 설정", plUrl, async (url) => {
+        try {
+          await setDoc(doc(db, "siteLinks", "plStatement"), { url, updatedAt: new Date().toISOString(), updatedBy: state.profile.name });
+          showToast("저장되었습니다.");
+          renderSection(section.key);
+        } catch (err) {
+          alert("저장 중 오류: " + err.message);
+        }
+      });
+    };
+  }
 
   document.getElementById("googleAuthBtn").onclick = async () => {
     try { await requestGoogleAuth(); showToast("구글 계정이 연결되었습니다."); renderSection(section.key); }
