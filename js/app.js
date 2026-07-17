@@ -263,7 +263,7 @@ async function renderMonthlySchedule(section) {
     if (canEdit) {
       return `<td style="${cellBase}${bgStyle}padding:0;border-radius:4px;">
         <input type="text" class="sched-cell" data-date="${dateStr}" data-row="${rowKey}" value="${escapeHtml(cell.text)}"
-          style="width:100%;box-sizing:border-box;border:none;background:transparent;color:inherit;font-weight:inherit;text-align:center;outline:none;padding:5px 10px;font-family:inherit;font-size:inherit;"></td>`;
+          style="width:100%;box-sizing:border-box;border:none;background:transparent;color:inherit;font-weight:inherit;text-align:center;outline:none;padding:0;font-family:inherit;font-size:inherit;"></td>`;
     }
     return `<td style="${cellBase}${bgStyle}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
