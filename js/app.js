@@ -184,9 +184,22 @@ const scheduleViewState = { year: new Date().getFullYear(), month: new Date().ge
 
 function scheduleRowKey(kind) { return kind; } // "location" | "note_에듀본사" | "time_10:00" 등
 
-function computeScheduleCellBg(text, explicitColor) {
-  if (text && text.includes("연차")) return "#000000";
-  return explicitColor || (text ? matchLocationColor(text) : null);
+const SCHEDULE_KEYWORD_RULES = [
+  { word: "연차", bg: "#000000", color: "#fff" },
+  { word: "회의", bg: "#E8938C", color: "#fff" },
+  { word: "식사", bg: "#BFBFBF", color: "#000" },
+  { word: "생일", bg: "#8E44AD", color: "#fff" },
+  { word: "이동", bg: "#F0E4C8", color: "#000" },
+  { word: "휴무", bg: "#FFFFFF", color: "#E03C3C" }
+];
+function computeScheduleCellStyle(text, explicitColor) {
+  if (text) {
+    for (const rule of SCHEDULE_KEYWORD_RULES) {
+      if (text.includes(rule.word)) return { bg: rule.bg, color: rule.color };
+    }
+  }
+  const bg = explicitColor || (text ? matchLocationColor(text) : null);
+  return { bg, color: bg ? "#fff" : "inherit" };
 }
 
 function findAdjacentCell(input, direction) {
@@ -245,7 +258,7 @@ async function renderMonthlySchedule(section) {
   const dates = [];
   for (let d = 1; d <= nDays; d++) dates.push(d);
 
-  const cellBase = "white-space:nowrap;min-width:40px;text-align:center;border-right:1px solid var(--border);";
+  const cellBase = "white-space:nowrap;min-width:80px;text-align:center;border-right:1px solid var(--border);";
   const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;padding:5px 10px;border-right:1px solid var(--border);";
 
   function getCellValue(dateStr, rowKey) {
@@ -258,12 +271,12 @@ async function renderMonthlySchedule(section) {
 
   function cellHtml(dateStr, rowKey) {
     const cell = getCellValue(dateStr, rowKey);
-    const bg = computeScheduleCellBg(cell.text, cell.color);
-    const bgStyle = bg ? `background:${bg};color:#fff;font-weight:700;` : "";
+    const { bg, color } = computeScheduleCellStyle(cell.text, cell.color);
+    const bgStyle = bg ? `background:${bg};color:${color};font-weight:700;` : "";
     if (canEdit) {
       return `<td style="${cellBase}${bgStyle}padding:0;border-radius:4px;">
         <input type="text" class="sched-cell" data-date="${dateStr}" data-row="${rowKey}" value="${escapeHtml(cell.text)}"
-          style="width:40px;box-sizing:border-box;border:none;background:transparent;color:inherit;font-weight:inherit;text-align:center;outline:none;padding:0;font-family:inherit;font-size:inherit;" size="1"></td>`;
+          style="width:80px;box-sizing:border-box;border:none;background:transparent;color:inherit;font-weight:inherit;text-align:center;outline:none;padding:0;font-family:inherit;font-size:inherit;" size="1"></td>`;
     }
     return `<td style="${cellBase}${bgStyle}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
@@ -324,9 +337,9 @@ async function renderMonthlySchedule(section) {
           if (!byDate[dateStr]) byDate[dateStr] = { date: dateStr, cells: {} };
           if (!byDate[dateStr].cells) byDate[dateStr].cells = {};
           byDate[dateStr].cells[rowKey] = { text: value, color: null };
-          const bg = computeScheduleCellBg(value, null);
+          const { bg, color } = computeScheduleCellStyle(value, null);
           const td = input.closest("td");
-          td.style.cssText = `${cellBase}${bg ? `background:${bg};color:#fff;font-weight:700;` : ""}padding:0;border-radius:4px;`;
+          td.style.cssText = `${cellBase}${bg ? `background:${bg};color:${color};font-weight:700;` : ""}padding:0;border-radius:4px;`;
         } catch (err) {
           alert("저장 중 오류: " + err.message);
         }
