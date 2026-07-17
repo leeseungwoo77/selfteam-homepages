@@ -14,12 +14,12 @@ import {
    columns         : 목록 표에 보여줄 필드 (없으면 fields 앞 3개 사용)
 =========================================================== */
 const SECTIONS = [
-  { key:"schedule", label:"팀장 일정", group:"일정 · 미팅", color:"green",
+  { key:"schedule", label:"팀장 일정", group:"일정·미팅", color:"green",
     collectionName:"scheduleEntries", scope:"team", writable:"leader",
     desc:"팀장 일정을 월 단위로 직접 입력하고 관리합니다.",
     isMonthlySchedule:true },
 
-  { key:"teamMeeting", label:"팀 회의 일지", group:"일정 · 미팅", color:"green",
+  { key:"teamMeeting", label:"팀 회의 일지", group:"일정·미팅", color:"green",
     collectionName:"teamMeetings", scope:"team", writable:"all",
     desc:"팀 전체 회의 내용을 기록합니다.",
     cardView:true, headerFields:["title","date","attendees"],
@@ -34,7 +34,7 @@ const SECTIONS = [
       { key:"images", label:"회의 슬라이드 이미지", type:"imageUpload" }
     ], columns:["date","attendees","agenda"] },
 
-  { key:"directorMeeting", label:"지점 원장 미팅 일지", group:"일정 · 미팅", color:"green",
+  { key:"directorMeeting", label:"지점 원장 미팅 일지", group:"일정·미팅", color:"green",
     collectionName:"directorMeetings", scope:"branch", writable:"leader",
     desc:"지점 원장님과의 미팅 내용을 기록합니다. (팀장만 열람 가능)",
     hasBranchSubmenu:true, leaderOnly:true, cardView:true, headerFields:["title","date","branchName","director"],
@@ -47,7 +47,7 @@ const SECTIONS = [
       { key:"followUp", label:"후속조치", type:"textarea" }
     ], columns:["date","branchName","director"] },
 
-  { key:"memberMeeting", label:"지점 팀원 개별 미팅 일지", group:"일정 · 미팅", color:"green",
+  { key:"memberMeeting", label:"지점 팀원 개별 미팅 일지", group:"일정·미팅", color:"green",
     collectionName:"memberMeetings", scope:"branch", writable:"leader-and-branch",
     desc:"지점 팀원과의 개별 미팅 내용을 기록합니다.",
     hasBranchSubmenu:true, cardView:true, headerFields:["title","date","branchName","memberName"],
@@ -99,7 +99,7 @@ const SECTIONS = [
     desc:"지점별 인력 이동 현황(잔류/신규입사/이동/퇴사)을 색깔 그대로 보여줍니다.",
     isRosterGrid:true }
 ];
-const GROUP_ORDER = ["일정 · 미팅", "성과·전략", "소통·협업", "자료실"];
+const GROUP_ORDER = ["일정·미팅", "성과·전략", "소통·협업", "자료실"];
 const COLOR_HEX = { blue:"var(--blue-bright)", green:"var(--green-bright)", magenta:"var(--magenta-bright)", neutral:"#9CA88F" };
 
 /* ===================== 팀장 일정 - 구글 시트 연동 (OAuth) =====================
