@@ -554,6 +554,7 @@ async function loadMenuOverrides() {
 function withOverride(section) {
   const o = state.menuOverrides[section.key];
   if (!o) return section;
+  const visibility = o.visibility || section.visibility;
   return {
     ...section,
     label: o.label || section.label,
@@ -561,7 +562,8 @@ function withOverride(section) {
     color: o.color || section.color,
     order: o.order ?? section.order,
     writable: o.writable || section.writable,
-    leaderOnly: o.visibility ? o.visibility === "leader" : section.leaderOnly,
+    visibility,
+    leaderOnly: visibility ? visibility === "leader" : section.leaderOnly,
     hidden: !!o.hidden
   };
 }
@@ -740,16 +742,19 @@ async function renderSection(key) {
 
 async function fetchDocs(section) {
   const colRef = collection(db, section.collectionName);
-  let q;
+  const clauses = [];
   if (section.scope === "custom") {
-    q = query(colRef, where("folderId", "==", section.folderId));
-  } else if (section.scope === "branch" && !canViewAllRole()) {
-    q = query(colRef, where("branchId", "==", state.profile.branchId));
-  } else if (section.scope === "branch" && state.branchFilter[section.key]) {
-    q = query(colRef, where("branchId", "==", state.branchFilter[section.key]));
-  } else {
-    q = colRef;
+    clauses.push(where("folderId", "==", section.folderId));
   }
+  if (section.scope === "branch" && !canViewAllRole()) {
+    clauses.push(where("branchId", "==", state.profile.branchId));
+  } else if (section.scope === "branch" && state.branchFilter[section.key]) {
+    clauses.push(where("branchId", "==", state.branchFilter[section.key]));
+  } else if (section.scope !== "branch" && section.visibility === "branch" && !canViewAllRole()) {
+    // 팀 전체/사용자 정의 폴더 메뉴인데 "팀장은 전체 / 팀원은 자기 지점만 열람"으로 설정된 경우
+    clauses.push(where("branchId", "==", state.profile.branchId));
+  }
+  const q = clauses.length ? query(colRef, ...clauses) : colRef;
   const snap = await getDocs(q);
   const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   docs.sort((a, b) => (b.date || b.createdAt || "").localeCompare(a.date || a.createdAt || ""));
@@ -763,15 +768,16 @@ function renderTable(section, docs) {
     return;
   }
   const cols = section.columns || section.fields.slice(0, 3).map(f => f.key);
+  const colsWithBranch = (section.visibility === "branch" && !cols.includes("branchName")) ? ["branchName", ...cols] : cols;
   const fieldMap = Object.fromEntries(section.fields.map(f => [f.key, f]));
 
   let html = `<table><thead><tr>`;
-  cols.forEach(c => html += `<th>${fieldMap[c] ? fieldMap[c].label : (c === "branchName" ? "지점" : c)}</th>`);
+  colsWithBranch.forEach(c => html += `<th>${fieldMap[c] ? fieldMap[c].label : (c === "branchName" ? "지점" : c)}</th>`);
   html += `<th></th></tr></thead><tbody>`;
 
   docs.forEach(d => {
     html += `<tr>`;
-    cols.forEach(c => {
+    colsWithBranch.forEach(c => {
       let val = d[c] ?? "";
       const f = fieldMap[c];
       if (c === "important") {
@@ -849,6 +855,7 @@ async function renderLogCards(section) {
     const editable = canEditDoc(section, d);
     const metaKeys = section.headerFields.filter(k => k !== "title");
     const metaParts = metaKeys.map(k => d[k]).filter(Boolean).map(escapeHtml);
+    if (d.branchName && !metaKeys.includes("branchName")) metaParts.unshift(escapeHtml(d.branchName));
     if (d.createdAt) metaParts.push("업로드: " + escapeHtml(String(d.createdAt).slice(0, 10)));
     const metaText = metaParts.join(" · ");
     const titleText = d.title ? escapeHtml(d.title) : (metaParts.length ? "" : "(제목 없음)");
@@ -1545,11 +1552,12 @@ async function renderOkrFolder(section) {
     const krs = d.krs || [];
     const overall = krs.length ? Math.round(krs.reduce((s, k) => s + (k.achievement || 0), 0) / krs.length) : 0;
     const objectivePreview = (d.objective || "").slice(0, 50) + ((d.objective || "").length > 50 ? "…" : "");
+    const branchTag = d.branchName ? escapeHtml(d.branchName) + " · " : "";
     return `<div class="card meeting-card">
       <div class="log-summary" data-toggle="${d.id}">
         <div>
           <div style="font-weight:800;font-size:15px;">${escapeHtml(d.season || "")}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${escapeHtml(objectivePreview)} · 종합 달성율 ${overall}%<span class="log-chevron">›</span></div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${branchTag}${escapeHtml(objectivePreview)} · 종합 달성율 ${overall}%<span class="log-chevron">›</span></div>
         </div>
         ${editable ? `<div>
           <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
@@ -1611,6 +1619,7 @@ function openOkrModal(section, existing) {
   const root = document.getElementById("modalRoot");
   const seasons = seasonOptions();
   const krs = (existing && existing.krs) || [{}, {}, {}];
+  const needsBranch = section.visibility === "branch";
 
   root.innerHTML = `<div class="modal-bg" id="modalBg">
     <div class="modal" style="max-width:560px;">
@@ -1619,6 +1628,7 @@ function openOkrModal(section, existing) {
         <div class="field"><label>시즌</label>
           <select id="okrSeason">${seasons.map(s => `<option value="${s}" ${existing && existing.season === s ? "selected" : ""}>${s}</option>`).join("")}</select>
         </div>
+        ${needsBranch ? `<div class="field"><label>지점</label>${fieldInput({ key: "branchId", type: "branchSelect" }, existing ? existing.branchId : "")}</div>` : ""}
         <div class="field"><label>Objective (목적 · 정성적 서술)</label><textarea id="okrObjective" rows="2">${escapeHtml((existing && existing.objective) || "")}</textarea></div>
         ${[0, 1, 2].map(i => krBlockHtml(i, krs[i])).join("")}
         <div class="grid-2" style="margin-top:10px;">
@@ -1648,6 +1658,17 @@ function openOkrModal(section, existing) {
         folderId: section.folderId, season, objective, krs: krsData,
         updatedAt: new Date().toISOString(), updatedBy: state.profile.name
       };
+      if (needsBranch) {
+        const branchEl = document.getElementById("f_branchId");
+        const branchId = branchEl ? branchEl.value : "";
+        data.branchId = branchId;
+        if (state.profile.role !== "leader") {
+          data.branchName = state.profile.branchName;
+        } else {
+          const b = state.branches.find(x => x.id === branchId);
+          data.branchName = b ? b.name : "";
+        }
+      }
       if (existing) {
         await updateDoc(doc(db, "folderEntries", existing.id), data);
       } else {
@@ -1730,7 +1751,14 @@ function openModal(section, existing) {
   const root = document.getElementById("modalRoot");
   const imageState = {}; // key -> { urls: [...기존 URL], files: [새로 추가한 File] }
 
-  const fieldsHtml = section.fields.map(f => {
+  // "팀장은 전체 / 팀원은 자기 지점만 열람"으로 설정된 메뉴인데 원래 지점 필드가 없다면(팀 회의 일지, 공지사항, 사용자 정의 폴더 등)
+  // 등록/수정 폼에 지점 선택 필드를 자동으로 추가합니다.
+  const needsBranchField = section.visibility === "branch" && !section.fields.some(f => f.type === "branchSelect");
+  const formFields = needsBranchField
+    ? [{ key: "branchId", label: "지점", type: "branchSelect" }, ...section.fields]
+    : section.fields;
+
+  const fieldsHtml = formFields.map(f => {
     if (f.type === "imageUpload") {
       imageState[f.key] = { urls: [...((existing && existing[f.key]) || [])], files: [] };
       return `<div class="field">
@@ -1785,7 +1813,7 @@ function openModal(section, existing) {
     });
   }
 
-  section.fields.filter(f => f.type === "imageUpload").forEach(f => {
+  formFields.filter(f => f.type === "imageUpload").forEach(f => {
     renderThumbs(f.key);
     document.getElementById(`imginput_${f.key}`).addEventListener("change", (e) => {
       imageState[f.key].files.push(...Array.from(e.target.files));
@@ -1801,7 +1829,7 @@ function openModal(section, existing) {
     saveBtn.textContent = "저장 중...";
     try {
       const data = {};
-      for (const f of section.fields) {
+      for (const f of formFields) {
         if (f.type === "imageUpload") continue;
         const el = document.getElementById(`f_${f.key}`);
         if (f.type === "richtext") {
@@ -1810,7 +1838,7 @@ function openModal(section, existing) {
           data[f.key] = el ? el.value : "";
         }
       }
-      for (const f of section.fields) {
+      for (const f of formFields) {
         if (f.type !== "imageUpload") continue;
         const st = imageState[f.key];
         const uploadedUrls = [];
@@ -1822,7 +1850,7 @@ function openModal(section, existing) {
         }
         data[f.key] = [...st.urls, ...uploadedUrls];
       }
-      if (section.scope === "branch") {
+      if (formFields.some(f => f.type === "branchSelect")) {
         if (state.profile.role !== "leader") {
           data.branchId = state.profile.branchId;
           data.branchName = state.profile.branchName;
@@ -1972,8 +2000,9 @@ function openMenuEditModal(item) {
   // (지점 성과 지표 / 지점 운영 자료 / 지점 인적 구성은 항상 팀장 전용으로 동작하는 별도 화면이라 대상에서 제외)
   const supportsPermission = item.isCustom || item.scope === "team" || item.scope === "branch";
   const isBranchScope = !item.isCustom && item.scope === "branch";
+  const supportsBranchVisibility = item.isCustom || item.scope === "team";
   const currentWritable = item.writable || "leader";
-  const currentVisibility = item.visibility != null ? item.visibility : (item.leaderOnly ? "leader" : "all");
+  const currentVisibility = item.visibility || (item.leaderOnly ? "leader" : "all");
 
   const permissionHtml = supportsPermission ? `
         <div class="field"><label>작성 권한</label>
@@ -1985,9 +2014,12 @@ function openMenuEditModal(item) {
         </div>
         <div class="field"><label>열람 권한</label>
           <select id="menuEditVisibility">
-            <option value="all" ${currentVisibility !== "leader" ? "selected" : ""}>전체 열람 가능</option>
+            <option value="all" ${currentVisibility === "all" ? "selected" : ""}>전체 열람 가능</option>
+            ${supportsBranchVisibility ? `<option value="branch" ${currentVisibility === "branch" ? "selected" : ""}>팀장은 전체 / 팀원은 자기 지점만 열람</option>` : ""}
             <option value="leader" ${currentVisibility === "leader" ? "selected" : ""}>팀장만 열람 가능</option>
           </select>
+          ${isBranchScope ? `<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">이 메뉴는 원래부터 팀원에게는 자기 지점 데이터만 보여요. 여기서는 팀원에게 이 메뉴 자체를 아예 숨길지(팀장만 열람)만 정할 수 있습니다.</p>` : ""}
+          ${supportsBranchVisibility ? `<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">"팀원은 자기 지점만 열람"을 선택하면 등록/수정 화면에 지점 선택란이 자동으로 생겨요. 지점을 지정하지 않고 저장한 기존 글은 팀장에게만 보입니다.</p>` : ""}
         </div>` : `
         <p style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">이 메뉴는 항상 팀장만 편집할 수 있는 전용 화면이라 작성/열람 권한 설정은 지원하지 않아요. 이름·그룹·색상 변경과 삭제(숨기기)만 가능합니다.</p>`;
 
