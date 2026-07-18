@@ -1984,9 +1984,16 @@ async function moveMenuItem(allItems, key, direction) {
   const swapWith = direction === "up" ? index - 1 : index + 1;
   if (swapWith < 0 || swapWith >= allItems.length) return;
   if (allItems[swapWith].group !== allItems[index].group) return;
-  const a = allItems[index], b = allItems[swapWith];
-  const orderA = a.order ?? 0, orderB = b.order ?? 0;
-  await Promise.all([persistItemOrder(a, orderB), persistItemOrder(b, orderA)]);
+
+  // 두 항목의 order 값을 그냥 맞바꾸면, 새로 만든 폴더처럼 여러 항목이 같은 기본값(1000)을
+  // 가지고 있을 때 값을 바꿔도 여전히 똑같아서 아무 변화가 없어 보일 수 있습니다.
+  // 그래서 같은 그룹 안의 모든 항목에 0,1,2...로 순서를 다시 매겨서 항상 확실히 반영되게 합니다.
+  const reordered = [...allItems];
+  [reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]];
+  const group = allItems[index].group;
+  const groupItems = reordered.filter(it => it.group === group);
+
+  await Promise.all(groupItems.map((it, i) => persistItemOrder(it, i)));
   await loadCustomFolders();
   await loadMenuOverrides();
   buildNav();
@@ -2181,7 +2188,14 @@ async function renderAdmin() {
     const writable = document.getElementById("newFolderWritable").value;
     const visibility = document.getElementById("newFolderVisibility").value;
     const template = document.getElementById("newFolderTemplate").value;
-    await addDoc(collection(db, "customFolders"), { label, group, color, writable, visibility, template, createdAt: new Date().toISOString() });
+    // 같은 그룹 안 항목들 중 가장 큰 order보다 1 큰 값을 줘서, 새 폴더가 기존 폴더와 순서값이
+    // 겹치는 일 없이 항상 그룹 맨 끝에 확실히 놓이도록 합니다.
+    const groupItems = [
+      ...SECTIONS.map((s, i) => withOverride({ ...s, order: s.order ?? i })),
+      ...state.customFolders.map(f => withOverride(folderToSection(f)))
+    ].filter(s => s.group === group);
+    const order = groupItems.length ? Math.max(...groupItems.map(s => s.order ?? 0)) + 1 : 0;
+    await addDoc(collection(db, "customFolders"), { label, group, color, writable, visibility, template, order, createdAt: new Date().toISOString() });
     await loadCustomFolders();
     showToast("폴더가 생성되었습니다.");
     buildNav();
