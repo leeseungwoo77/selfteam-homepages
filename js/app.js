@@ -69,10 +69,12 @@ const SECTIONS = [
   { key:"notice", label:"팀 공지사항", group:"소통·협업", color:"magenta",
     collectionName:"notices", scope:"team", writable:"leader",
     desc:"팀 전체 공지사항입니다.",
+    cardView:true, headerFields:["title","important"],
     fields:[
       { key:"title", label:"제목", type:"text" },
       { key:"important", label:"중요 공지", type:"importanceSelect" },
-      { key:"content", label:"내용", type:"textarea" }
+      { key:"content", label:"내용", type:"textarea" },
+      { key:"images", label:"첨부파일 (이미지·PDF·PPT)", type:"imageUpload" }
     ], columns:["title","important"] },
 
   { key:"operation", label:"지점 운영 자료", group:"자료실", color:"neutral",
@@ -82,19 +84,23 @@ const SECTIONS = [
   { key:"leadership", label:"리더십 자료", group:"자료실", color:"neutral",
     collectionName:"leadership", scope:"team", writable:"leader",
     desc:"리더십 관련 자료입니다.",
+    cardView:true, headerFields:["title"],
     fields:[
       { key:"title", label:"제목", type:"text" },
       { key:"content", label:"내용", type:"textarea" },
-      { key:"fileLink", label:"첨부 링크(URL)", type:"text" }
+      { key:"fileLink", label:"첨부 링크(URL)", type:"link" },
+      { key:"images", label:"첨부파일 (이미지·PDF·PPT)", type:"imageUpload" }
     ], columns:["title"] },
 
   { key:"study", label:"팀 스터디 자료", group:"자료실", color:"neutral",
     collectionName:"study", scope:"team", writable:"all",
     desc:"팀 스터디 자료를 함께 공유합니다.",
+    cardView:true, headerFields:["title"],
     fields:[
       { key:"title", label:"제목", type:"text" },
       { key:"content", label:"내용", type:"textarea" },
-      { key:"fileLink", label:"첨부 링크(URL)", type:"text" }
+      { key:"fileLink", label:"첨부 링크(URL)", type:"link" },
+      { key:"images", label:"첨부파일 (이미지·PDF·PPT)", type:"imageUpload" }
     ], columns:["title"] },
 
   { key:"roster", label:"지점 인적 구성", group:"자료실", color:"neutral",
@@ -998,6 +1004,7 @@ async function renderFolderGrid(section) {
   const stripHtml = (html) => (html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   const previewField = section.fields.find(f => f.type === "richtext" || f.type === "textarea");
   const imageField = section.fields.find(f => f.type === "imageUpload");
+  const fieldMap = Object.fromEntries(section.fields.map(f => [f.key, f]));
   const metaKeys = (section.headerFields || []).filter(k => k !== "title");
 
   wrap.innerHTML = `<div class="folder-grid">${docs.map((d, i) => {
@@ -1007,7 +1014,11 @@ async function renderFolderGrid(section) {
     const thumbUrl = attachments[0] || "";
     const thumbIsImage = thumbUrl && isImageFile(thumbUrl);
     const uploadDate = (d.createdAt || d.updatedAt || "").slice(0, 10);
-    const metaParts = metaKeys.map(k => d[k]).filter(Boolean).map(escapeHtml);
+    const metaParts = metaKeys.map(k => {
+      const f = fieldMap[k];
+      if (f && f.type === "importanceSelect") return d[k] === "yes" ? "🔴 중요" : "";
+      return d[k] ? escapeHtml(d[k]) : "";
+    }).filter(Boolean);
     if (uploadDate) metaParts.push("업로드: " + escapeHtml(uploadDate));
     return `<div class="card folder-grid-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
@@ -1072,6 +1083,9 @@ function openFolderEntryDetailModal(section, entry) {
     .filter(f => f.key !== "title" && f.type !== "imageUpload" && f.type !== "branchSelect")
     .map(f => {
       const val = entry[f.key];
+      if (f.type === "importanceSelect") {
+        return val === "yes" ? `<p style="margin:0 0 12px;"><span class="pill important">중요</span></p>` : "";
+      }
       if (!val) return "";
       if (f.type === "link") {
         return `<p style="margin-bottom:14px;"><a href="${escapeHtml(val)}" target="_blank" rel="noopener" style="color:var(--blue-deep);font-weight:700;">${escapeHtml(f.label)} 열기 ↗</a></p>`;
