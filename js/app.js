@@ -958,7 +958,7 @@ async function renderEvalSheet(section) {
         ${plUrl
           ? `<a href="${escapeHtml(plUrl)}" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">손익계산서</a>${state.profile.role === "leader" ? `<button class="icon-btn" id="editPlLinkBtn" type="button">수정</button>` : ""}`
           : (state.profile.role === "leader" ? `<button class="btn small secondary" id="editPlLinkBtn" type="button">+ 손익계산서 링크 설정</button>` : "")}
-        <a href="https://docs.google.com/spreadsheets/d/${EVAL_SPREADSHEET_ID}/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">원본 시트 열기</a>
+        ${state.profile.role === "leader" ? `<a href="https://docs.google.com/spreadsheets/d/${EVAL_SPREADSHEET_ID}/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">원본 시트 열기</a>` : ""}
         <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
         <select id="evalYearSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
       </div>
