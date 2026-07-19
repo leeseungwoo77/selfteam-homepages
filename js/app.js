@@ -723,8 +723,7 @@ async function renderSection(key) {
   if (section.isOkr) { renderOkrFolder(section); return; }
   if (section.isRosterGrid) { renderRosterGrid(section); return; }
   if (section.isMeetingGrid) { renderMeetingGrid(section); return; }
-  if (section.cardView && section.scope === "custom") { renderFolderGrid(section); return; }
-  if (section.cardView) { renderLogCards(section); return; }
+  if (section.cardView) { renderFolderGrid(section); return; }
 
   const branchId = state.branchFilter[section.key];
   const branchLabel = section.hasBranchSubmenu
@@ -927,12 +926,21 @@ async function renderLogCards(section) {
 /* ===================== 사용자 정의 폴더 - 4칸 그리드 보기 (순서는 ▲▼로 직접 조정) ===================== */
 async function renderFolderGrid(section) {
   const main = document.getElementById("mainContent");
+  const branchId = state.branchFilter[section.key];
+  const branchLabel = section.hasBranchSubmenu
+    ? (canViewAllRole()
+        ? (branchId ? " · " + (state.branches.find(b => b.id === branchId)?.name || "") : " · 전체")
+        : " · " + (state.profile.branchName || ""))
+    : "";
   main.innerHTML = `<div class="page-header">
       <div>
-        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}${branchLabel}</h1>
         <p>${section.desc}</p>
       </div>
-      ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
+      <div style="display:flex;gap:8px;">
+        ${section.extraLink ? `<a href="${section.extraLink.url}" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">${escapeHtml(section.extraLink.label)}</a>` : ""}
+        ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
+      </div>
     </div>
     <div id="folderGridWrap">불러오는 중...</div>`;
 
@@ -956,12 +964,17 @@ async function renderFolderGrid(section) {
   }
 
   const stripHtml = (html) => (html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const previewField = section.fields.find(f => f.type === "richtext" || f.type === "textarea");
+  const imageField = section.fields.find(f => f.type === "imageUpload");
+  const metaKeys = (section.headerFields || []).filter(k => k !== "title");
 
   wrap.innerHTML = `<div class="folder-grid">${docs.map((d, i) => {
     const editable = canEditDoc(section, d);
-    const preview = stripHtml(d.content);
-    const thumb = (d.images && d.images[0]) ? d.images[0] : "";
+    const preview = previewField ? stripHtml(d[previewField.key]) : "";
+    const thumb = imageField && d[imageField.key] && d[imageField.key][0] ? d[imageField.key][0] : "";
     const uploadDate = (d.createdAt || d.updatedAt || "").slice(0, 10);
+    const metaParts = metaKeys.map(k => d[k]).filter(Boolean).map(escapeHtml);
+    if (uploadDate) metaParts.push("업로드: " + escapeHtml(uploadDate));
     return `<div class="card folder-grid-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
         <div style="font-weight:800;font-size:14px;cursor:pointer;flex:1;" data-view="${d.id}">${escapeHtml(d.title || "(제목 없음)")}</div>
@@ -970,9 +983,9 @@ async function renderFolderGrid(section) {
           <button class="icon-btn" style="padding:0 4px;line-height:1.3;" data-move="down" data-id="${d.id}" ${i === docs.length - 1 ? "disabled" : ""}>▼</button>
         </div>` : ""}
       </div>
-      ${uploadDate ? `<div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px;">업로드: ${escapeHtml(uploadDate)}</div>` : ""}
+      ${metaParts.length ? `<div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px;">${metaParts.join(" · ")}</div>` : ""}
       ${thumb ? `<img src="${thumb}" style="width:100%;height:110px;object-fit:cover;border-radius:8px;margin-bottom:8px;cursor:pointer;" data-view="${d.id}">` : ""}
-      <div style="font-size:12.5px;color:var(--text-main);cursor:pointer;line-height:1.5;min-height:20px;" data-view="${d.id}">${escapeHtml(preview.slice(0, 60))}${preview.length > 60 ? "…" : ""}</div>
+      ${preview ? `<div style="font-size:12.5px;color:var(--text-main);cursor:pointer;line-height:1.5;min-height:20px;" data-view="${d.id}">${escapeHtml(preview.slice(0, 60))}${preview.length > 60 ? "…" : ""}</div>` : ""}
       ${editable ? `<div style="margin-top:10px;display:flex;gap:10px;justify-content:flex-end;">
         <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
         <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
@@ -1008,21 +1021,34 @@ async function moveFolderEntry(section, entries, id, direction) {
   // 예전 게시물처럼 order가 아예 없던 경우에도 클릭 즉시 확실히 반영되게 합니다.
   const reordered = [...entries];
   [reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]];
-  await Promise.all(reordered.map((e, i) => updateDoc(doc(db, "folderEntries", e.id), { order: i })));
+  await Promise.all(reordered.map((e, i) => updateDoc(doc(db, section.collectionName, e.id), { order: i })));
   renderSection(section.key);
 }
 
 function openFolderEntryDetailModal(section, entry) {
   const root = document.getElementById("modalRoot");
   const canEdit = canEditDoc(section, entry);
-  const images = entry.images || [];
   const uploadDate = (entry.createdAt || entry.updatedAt || "").slice(0, 10);
+  const imageField = section.fields.find(f => f.type === "imageUpload");
+  const images = (imageField && entry[imageField.key]) || [];
+
+  const bodyHtml = section.fields
+    .filter(f => f.key !== "title" && f.type !== "imageUpload" && f.type !== "branchSelect")
+    .map(f => {
+      const val = entry[f.key];
+      if (!val) return "";
+      if (f.type === "link") {
+        return `<p style="margin-bottom:14px;"><a href="${escapeHtml(val)}" target="_blank" rel="noopener" style="color:var(--blue-deep);font-weight:700;">${escapeHtml(f.label)} 열기 ↗</a></p>`;
+      }
+      const display = f.type === "richtext" ? sanitizeRichHtml(val) : escapeHtml(val).replace(/\n/g, "<br>");
+      return `<div style="margin-bottom:12px;"><div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:4px;">${f.label}</div><div class="rich-content">${display}</div></div>`;
+    }).join("");
+
   root.innerHTML = `<div class="modal-bg" id="modalBg">
     <div class="modal" style="max-width:640px;">
       <h3>${escapeHtml(entry.title || "")}</h3>
       ${uploadDate ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">업로드: ${escapeHtml(uploadDate)}</div>` : ""}
-      <div class="rich-content" style="margin-bottom:14px;">${sanitizeRichHtml(entry.content || "")}</div>
-      ${entry.link ? `<p style="margin-bottom:14px;"><a href="${escapeHtml(entry.link)}" target="_blank" rel="noopener" style="color:var(--blue-deep);font-weight:700;">첨부 링크 열기 ↗</a></p>` : ""}
+      ${bodyHtml || `<p style="color:var(--text-muted);font-size:13px;">등록된 내용이 없습니다.</p>`}
       ${images.length ? `<div class="meeting-gallery">${images.map(url => `<span class="img-zoom-wrap"><img src="${url}" class="meeting-img" data-zoom="0" loading="lazy" onclick="cycleMeetingImgZoom(this)"></span>`).join("")}</div>` : ""}
       <div class="grid-2" style="margin-top:16px;">
         <button type="button" class="btn secondary" id="closeDetailBtn">닫기</button>
