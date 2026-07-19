@@ -1716,9 +1716,9 @@ function renderOkrGridBody(section, docs, year) {
   });
 
   let html = `<table style="min-width:900px;width:100%;border-collapse:collapse;table-layout:fixed;">
-    <colgroup><col style="width:110px;">${columns.map(() => `<col style="width:22%;">`).join("")}</colgroup>
+    <colgroup><col style="width:56px;">${columns.map(() => `<col>`).join("")}</colgroup>
     <thead><tr>
-    <th style="border-right:2px solid var(--border);">구분</th>
+    <th style="border-right:2px solid var(--border);padding-left:6px;padding-right:6px;">구분</th>
     ${columns.map((c, idx) => `<th style="${colStyle(idx)}word-break:break-word;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
         <span>${c.sd.label}</span>
@@ -1728,10 +1728,10 @@ function renderOkrGridBody(section, docs, year) {
       </div>
     </th>`).join("")}
   </tr></thead><tbody>
-    <tr><td style="font-weight:700;border-right:2px solid var(--border);">Objective</td>
+    <tr><td style="font-weight:700;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;">Objective</td>
       ${columns.map((c, idx) => `<td style="${colStyle(idx)}word-break:break-word;">${c.doc && c.doc.objective ? escapeMultiline(c.doc.objective) : `<span style="color:var(--text-muted);">-</span>`}</td>`).join("")}
     </tr>
-    ${[0, 1, 2].map(i => `<tr><td style="font-weight:700;vertical-align:top;border-right:2px solid var(--border);">KR${i + 1}</td>
+    ${[0, 1, 2].map(i => `<tr><td style="font-weight:700;vertical-align:top;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;">KR${i + 1}</td>
       ${columns.map((c, idx) => {
         const kr = c.doc && (c.doc.krs || [])[i];
         if (!kr || !kr.title) return `<td style="${colStyle(idx)}word-break:break-word;"><span style="color:var(--text-muted);">-</span></td>`;
@@ -1745,7 +1745,7 @@ function renderOkrGridBody(section, docs, year) {
         </td>`;
       }).join("")}
     </tr>`).join("")}
-    <tr><td style="font-weight:700;border-right:2px solid var(--border);">종합 달성율</td>
+    <tr><td style="font-weight:700;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;">종합 달성율</td>
       ${columns.map((c, idx) => `<td class="mono" style="font-weight:800;color:var(--blue-deep);${colStyle(idx)}">${c.doc ? overallAchievement(c.doc.krs || []) + "%" : "-"}</td>`).join("")}
     </tr>
   </tbody></table>`;
