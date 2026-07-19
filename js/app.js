@@ -1705,6 +1705,9 @@ async function renderOkrFolder(section) {
 function renderOkrGridBody(section, docs, year) {
   const wrap = document.getElementById("okrGridWrap");
   const escapeMultiline = (s) => escapeHtml(s || "").replace(/\n/g, "<br>");
+  // 봄(연분홍) · 여름(하늘빛) · 가을(살구빛) · 겨울(차가운 회청빛) 느낌으로 시즌 배경색을 구분합니다.
+  const SEASON_BG = ["#FCEEF3", "#E5F6FA", "#FBF0DE", "#EAEEF4"];
+  const colStyle = (idx) => `background:${SEASON_BG[idx % SEASON_BG.length]};border-left:2px solid var(--border);`;
 
   const columns = SEASON_DEFS.map(sd => {
     const label = seasonLabel(year, sd);
@@ -1712,10 +1715,12 @@ function renderOkrGridBody(section, docs, year) {
     return { label, sd, doc: matches[0] || null };
   });
 
-  let html = `<table style="min-width:900px;"><thead><tr>
-    <th style="min-width:90px;">구분</th>
-    ${columns.map(c => `<th style="min-width:220px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+  let html = `<table style="min-width:900px;width:100%;border-collapse:collapse;table-layout:fixed;">
+    <colgroup><col style="width:110px;">${columns.map(() => `<col style="width:22%;">`).join("")}</colgroup>
+    <thead><tr>
+    <th style="border-right:2px solid var(--border);">구분</th>
+    ${columns.map((c, idx) => `<th style="${colStyle(idx)}word-break:break-word;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
         <span>${c.sd.label}</span>
         ${c.doc
           ? (canEditDoc(section, c.doc) ? `<span style="white-space:nowrap;"><button class="icon-btn" data-edit-okr="${c.doc.id}">수정</button><button class="icon-btn danger" data-del-okr="${c.doc.id}">삭제</button></span>` : "")
@@ -1723,25 +1728,25 @@ function renderOkrGridBody(section, docs, year) {
       </div>
     </th>`).join("")}
   </tr></thead><tbody>
-    <tr><td style="font-weight:700;">Objective</td>
-      ${columns.map(c => `<td>${c.doc && c.doc.objective ? escapeMultiline(c.doc.objective) : `<span style="color:var(--text-muted);">-</span>`}</td>`).join("")}
+    <tr><td style="font-weight:700;border-right:2px solid var(--border);">Objective</td>
+      ${columns.map((c, idx) => `<td style="${colStyle(idx)}word-break:break-word;">${c.doc && c.doc.objective ? escapeMultiline(c.doc.objective) : `<span style="color:var(--text-muted);">-</span>`}</td>`).join("")}
     </tr>
-    ${[0, 1, 2].map(i => `<tr><td style="font-weight:700;vertical-align:top;">KR${i + 1}</td>
-      ${columns.map(c => {
+    ${[0, 1, 2].map(i => `<tr><td style="font-weight:700;vertical-align:top;border-right:2px solid var(--border);">KR${i + 1}</td>
+      ${columns.map((c, idx) => {
         const kr = c.doc && (c.doc.krs || [])[i];
-        if (!kr || !kr.title) return `<td><span style="color:var(--text-muted);">-</span></td>`;
+        if (!kr || !kr.title) return `<td style="${colStyle(idx)}word-break:break-word;"><span style="color:var(--text-muted);">-</span></td>`;
         const ach = krAchievement(kr);
         const kts = normalizeKts(kr.kts).filter(kt => (kt.text || "").trim());
-        return `<td>
+        return `<td style="${colStyle(idx)}word-break:break-word;">
           <div style="font-size:13px;font-weight:700;margin-bottom:4px;">${escapeHtml(kr.title)}</div>
-          <div style="background:#EAF3E3;border-radius:6px;height:8px;margin:6px 0;overflow:hidden;"><div style="background:var(--green-bright);height:100%;width:${ach}%;"></div></div>
+          <div style="background:#FFFFFFAA;border-radius:6px;height:8px;margin:6px 0;overflow:hidden;"><div style="background:var(--green-bright);height:100%;width:${ach}%;"></div></div>
           <div class="mono" style="font-size:12px;color:var(--green-deep);font-weight:700;">${ach}%</div>
           ${kts.length ? `<ul style="margin:6px 0 0 16px;font-size:12px;line-height:1.6;">${kts.map(kt => `<li>${escapeHtml(kt.text)} <span class="mono" style="color:var(--text-muted);">(${kt.score || 0}점)</span></li>`).join("")}</ul>` : ""}
         </td>`;
       }).join("")}
     </tr>`).join("")}
-    <tr><td style="font-weight:700;">종합 달성율</td>
-      ${columns.map(c => `<td class="mono" style="font-weight:800;color:var(--blue-deep);">${c.doc ? overallAchievement(c.doc.krs || []) + "%" : "-"}</td>`).join("")}
+    <tr><td style="font-weight:700;border-right:2px solid var(--border);">종합 달성율</td>
+      ${columns.map((c, idx) => `<td class="mono" style="font-weight:800;color:var(--blue-deep);${colStyle(idx)}">${c.doc ? overallAchievement(c.doc.krs || []) + "%" : "-"}</td>`).join("")}
     </tr>
   </tbody></table>`;
   wrap.innerHTML = html;
