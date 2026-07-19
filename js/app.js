@@ -37,7 +37,7 @@ const SECTIONS = [
   { key:"directorMeeting", label:"지점 원장 미팅 일지", group:"일정·미팅", color:"green",
     collectionName:"directorMeetings", scope:"branch", writable:"leader",
     desc:"지점 원장님과의 미팅 내용을 기록합니다. (팀장만 열람 가능)",
-    hasBranchSubmenu:true, leaderOnly:true, cardView:true, headerFields:["title","date","branchName","director"],
+    hasBranchSubmenu:true, leaderOnly:true, isMeetingGrid:true, headerFields:["title","date","branchName","director"],
     fields:[
       { key:"title", label:"제목", type:"text" },
       { key:"date", label:"날짜", type:"date" },
@@ -700,6 +700,13 @@ function canEditDoc(section, data) {
   if (section.writable === "leader-and-branch") return data.branchId === state.profile.branchId;
   return false;
 }
+function canCreateForBranch(section, branchId) {
+  if (state.profile.role === "viewer") return false;
+  if (state.profile.role === "leader") return true;
+  if (section.writable === "all") return true;
+  if (section.writable === "leader-and-branch") return branchId === state.profile.branchId;
+  return false;
+}
 
 /* ===================== 섹션 렌더링(목록) ===================== */
 async function renderSection(key) {
@@ -715,6 +722,7 @@ async function renderSection(key) {
   if (section.isOpsGrid) { renderOpsGrid(section); return; }
   if (section.isOkr) { renderOkrFolder(section); return; }
   if (section.isRosterGrid) { renderRosterGrid(section); return; }
+  if (section.isMeetingGrid) { renderMeetingGrid(section); return; }
   if (section.cardView) { renderLogCards(section); return; }
 
   const branchId = state.branchFilter[section.key];
@@ -915,7 +923,123 @@ async function renderLogCards(section) {
   });
 }
 
-/* ===================== 지점 성과 지표 - 평가지표 구글 시트 임베드 (연도 탭 등록) ===================== */
+/* ===================== 지점 x 미팅 그리드 (가로: 지점, 세로: 제목/주차별 미팅) ===================== */
+async function renderMeetingGrid(section) {
+  const main = document.getElementById("mainContent");
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <p>${section.desc}</p>
+      </div>
+      ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
+    </div>
+    <div class="card" style="overflow:auto;"><div id="meetingGridWrap">불러오는 중...</div></div>`;
+
+  if (canWriteSection(section)) {
+    document.getElementById("addBtn").onclick = () => openModal(section, null);
+  }
+
+  const docs = await fetchDocs(section);
+  const filterBranchId = state.branchFilter[section.key];
+  const branches = canViewAllRole()
+    ? (filterBranchId ? state.branches.filter(b => b.id === filterBranchId) : state.branches)
+    : state.branches.filter(b => b.id === state.profile.branchId);
+  const branchesSorted = [...branches].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  const wrap = document.getElementById("meetingGridWrap");
+  if (!branchesSorted.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다.</div>`; return; }
+
+  // 세로축: title(예: "2026년 7월 2주차") 기준으로 한 줄. 같은 제목+지점에 여러 건이 있으면 최신 날짜만 표시.
+  const rowMap = {};
+  docs.forEach(d => {
+    const key = d.title || "(제목 없음)";
+    if (!rowMap[key]) rowMap[key] = { title: key, latestDate: d.date || "", cells: {} };
+    if ((d.date || "") > rowMap[key].latestDate) rowMap[key].latestDate = d.date || "";
+    const cur = rowMap[key].cells[d.branchId];
+    if (!cur || (d.date || "") > (cur.date || "")) rowMap[key].cells[d.branchId] = d;
+  });
+  const rows = Object.values(rowMap).sort((a, b) => (b.latestDate || "").localeCompare(a.latestDate || ""));
+
+  if (!rows.length) { wrap.innerHTML = `<div class="empty-state">등록된 미팅 기록이 없습니다.</div>`; return; }
+
+  const stripHtml = (html) => (html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+
+  let html = `<table class="table-compact"><thead><tr><th style="min-width:130px;">미팅</th>
+    ${branchesSorted.map(b => `<th style="min-width:150px;">${escapeHtml(b.name)}</th>`).join("")}
+  </tr></thead><tbody>`;
+
+  rows.forEach((row, ri) => {
+    html += `<tr><td style="font-weight:700;white-space:nowrap;">${escapeHtml(row.title)}</td>`;
+    branchesSorted.forEach(b => {
+      const cell = row.cells[b.id];
+      if (cell) {
+        const preview = stripHtml(cell.content);
+        html += `<td style="cursor:pointer;" data-cell-row="${ri}" data-cell-branch="${b.id}">
+          <div style="font-size:12px;color:var(--text-main);">${escapeHtml(preview.slice(0, 40))}${preview.length > 40 ? "…" : (preview ? "" : "(내용 없음)")}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(cell.date || "")}${cell.director ? " · " + escapeHtml(cell.director) : ""}</div>
+        </td>`;
+      } else if (canCreateForBranch(section, b.id)) {
+        html += `<td style="cursor:pointer;text-align:center;color:var(--text-muted);" data-cell-new-row="${ri}" data-cell-new-branch="${b.id}">+</td>`;
+      } else {
+        html += `<td style="text-align:center;color:var(--text-muted);">-</td>`;
+      }
+    });
+    html += `</tr>`;
+  });
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll("[data-cell-row]").forEach(td => {
+    td.onclick = () => {
+      const row = rows[parseInt(td.dataset.cellRow, 10)];
+      openMeetingDetailModal(section, row.cells[td.dataset.cellBranch]);
+    };
+  });
+  wrap.querySelectorAll("[data-cell-new-row]").forEach(td => {
+    td.onclick = () => {
+      const row = rows[parseInt(td.dataset.cellNewRow, 10)];
+      openModal(section, null, { title: row.title, branchId: td.dataset.cellNewBranch });
+    };
+  });
+}
+
+function openMeetingDetailModal(section, entry) {
+  const root = document.getElementById("modalRoot");
+  const canEdit = canEditDoc(section, entry);
+  const fieldRows = section.fields
+    .filter(f => f.type !== "branchSelect" && f.key !== "title" && f.key !== "date")
+    .map(f => {
+      const val = entry[f.key];
+      if (!val) return "";
+      const display = f.type === "richtext" ? sanitizeRichHtml(val) : escapeHtml(val).replace(/\n/g, "<br>");
+      return `<div style="margin-bottom:12px;"><div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:4px;">${f.label}</div><div class="rich-content">${display}</div></div>`;
+    }).join("");
+
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>${escapeHtml(entry.title || "")}${entry.branchName ? " · " + escapeHtml(entry.branchName) : ""}</h3>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">${escapeHtml(entry.date || "")}</div>
+      ${fieldRows || `<p style="color:var(--text-muted);font-size:13px;">등록된 내용이 없습니다.</p>`}
+      <div class="grid-2" style="margin-top:10px;">
+        <button type="button" class="btn secondary" id="closeDetailBtn">닫기</button>
+        ${canEdit ? `<button type="button" class="btn" id="editFromDetailBtn">수정</button>` : ""}
+      </div>
+      ${canEdit ? `<button type="button" class="icon-btn danger" id="deleteFromDetailBtn" style="margin-top:10px;width:100%;text-align:center;">삭제</button>` : ""}
+    </div></div>`;
+
+  document.getElementById("closeDetailBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  if (canEdit) {
+    document.getElementById("editFromDetailBtn").onclick = () => openModal(section, entry);
+    document.getElementById("deleteFromDetailBtn").onclick = async () => {
+      if (!confirm("정말 삭제하시겠습니까?")) return;
+      await deleteDoc(doc(db, section.collectionName, entry.id));
+      root.innerHTML = "";
+      showToast("삭제되었습니다.");
+      renderSection(section.key);
+    };
+  }
+}
 const EVAL_SPREADSHEET_ID = "1TA3ObFLBQGb9dmKlOEL4XxPmE308ifyOPhxzEzAe-I8";
 
 function openSimpleLinkModal(title, currentUrl, onSave) {
@@ -1747,7 +1871,7 @@ function fieldInput(field, value) {
   return `<input type="${field.type}" id="f_${field.key}" value="${escapeHtml(String(v))}">`;
 }
 
-function openModal(section, existing) {
+function openModal(section, existing, prefill) {
   const root = document.getElementById("modalRoot");
   const imageState = {}; // key -> { urls: [...기존 URL], files: [새로 추가한 File] }
 
@@ -1776,7 +1900,8 @@ function openModal(section, existing) {
         <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">Tiro 등에서 복사한 내용을 표까지 그대로 붙여넣기(Ctrl+V) 하실 수 있어요.</p>
       </div>`;
     }
-    return `<div class="field"><label>${f.label}</label>${fieldInput(f, existing ? existing[f.key] : "")}</div>`;
+    const currentVal = existing ? existing[f.key] : (prefill && prefill[f.key] !== undefined ? prefill[f.key] : "");
+    return `<div class="field"><label>${f.label}</label>${fieldInput(f, currentVal)}</div>`;
   }).join("");
 
   root.innerHTML = `<div class="modal-bg" id="modalBg">
