@@ -95,6 +95,10 @@ a { color: inherit; }
   border: 1px solid var(--border); padding: 6px 10px; font-size: 13px;
 }
 .rich-content { font-size: 13.5px; line-height: 1.6; overflow-x: auto; }
+/* 붙여넣기 한 글 안에 있던 인라인 font-size나 h1/h2 등 큰 제목 태그를 강제로 작게 눌러줍니다. */
+.rich-content, .rich-content * { font-size: 13px !important; line-height: 1.6 !important; }
+.rich-content h1, .rich-content h2, .rich-content h3, .rich-content h4 { font-weight: 700 !important; margin: 10px 0 4px !important; }
+.rich-content strong, .rich-content b { font-weight: 700 !important; }
 .rich-content p { margin: 4px 0; }
 
 .btn {
