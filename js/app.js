@@ -1716,12 +1716,12 @@ function renderOkrGridBody(section, docs, year) {
   });
 
   let html = `<table style="min-width:900px;width:100%;border-collapse:collapse;table-layout:fixed;">
-    <colgroup><col style="width:56px;">${columns.map(() => `<col>`).join("")}</colgroup>
+    <colgroup><col style="width:90px;">${columns.map(() => `<col>`).join("")}</colgroup>
     <thead><tr>
     <th style="border-right:2px solid var(--border);padding-left:6px;padding-right:6px;">구분</th>
     ${columns.map((c, idx) => `<th style="${colStyle(idx)}word-break:break-word;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
-        <span>${c.sd.label}</span>
+        <span style="font-size:15px;font-weight:800;color:var(--text-main);text-transform:none;letter-spacing:normal;">${c.sd.label}</span>
         ${c.doc
           ? (canEditDoc(section, c.doc) ? `<span style="white-space:nowrap;"><button class="icon-btn" data-edit-okr="${c.doc.id}">수정</button><button class="icon-btn danger" data-del-okr="${c.doc.id}">삭제</button></span>` : "")
           : (canWriteSection(section) ? `<button class="icon-btn" data-new-okr="${escapeHtml(c.label)}">+ 등록</button>` : "")}
