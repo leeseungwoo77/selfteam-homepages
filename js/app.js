@@ -44,7 +44,8 @@ const SECTIONS = [
       { key:"branchId", label:"지점", type:"branchSelect" },
       { key:"director", label:"원장 이름", type:"text" },
       { key:"content", label:"미팅 내용", type:"richtext" },
-      { key:"followUp", label:"후속조치", type:"textarea" }
+      { key:"followUp", label:"후속조치", type:"textarea" },
+      { key:"images", label:"첨부파일 (이미지·PDF·PPT)", type:"imageUpload" }
     ], columns:["date","branchName","director"] },
 
   { key:"memberMeeting", label:"지점 팀원 개별 미팅 일지", group:"일정·미팅", color:"green",
@@ -57,7 +58,8 @@ const SECTIONS = [
       { key:"branchId", label:"지점", type:"branchSelect" },
       { key:"memberName", label:"팀원 이름", type:"text" },
       { key:"content", label:"미팅 내용", type:"textarea" },
-      { key:"followUp", label:"후속조치", type:"textarea" }
+      { key:"followUp", label:"후속조치", type:"textarea" },
+      { key:"images", label:"첨부파일 (이미지·PDF·PPT)", type:"imageUpload" }
     ], columns:["date","branchName","memberName"] },
 
   { key:"performance", label:"지점 성과 지표", group:"성과·전략", color:"blue",
@@ -894,9 +896,7 @@ async function renderLogCards(section) {
       </div>
       <div class="log-body" id="body_${d.id}">
         ${bodyHtml}
-        ${images.length ? `<div class="meeting-gallery">
-          ${images.map(url => `<span class="img-zoom-wrap"><img src="${url}" class="meeting-img" data-zoom="0" loading="lazy" onclick="cycleMeetingImgZoom(this)"></span>`).join("")}
-        </div>` : ""}
+        ${renderAttachmentGallery(images)}
       </div>
     </div>`;
   }).join("");
@@ -921,6 +921,38 @@ async function renderLogCards(section) {
       renderSection(section.key);
     };
   });
+}
+
+function fileExtOf(s) {
+  const clean = String(s || "").split("?")[0].split("#")[0];
+  const m = clean.match(/\.([a-zA-Z0-9]+)$/);
+  return m ? m[1].toLowerCase() : "";
+}
+function isImageFile(s) { return ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(fileExtOf(s)); }
+function fileIconFor(s) {
+  const ext = fileExtOf(s);
+  if (ext === "pdf") return "📄";
+  if (ext === "ppt" || ext === "pptx") return "📊";
+  return "📎";
+}
+function fileNameFromUrl(url) {
+  try {
+    const pathPart = decodeURIComponent(String(url).split("?")[0]);
+    const lastSeg = pathPart.split("%2F").pop().split("/").pop();
+    return lastSeg.replace(/^\d+_[a-z0-9]+_/i, "") || "첨부파일";
+  } catch (e) { return "첨부파일"; }
+}
+// 이미지는 예전처럼 확대해서 볼 수 있는 갤러리로, PDF·PPT 등은 클릭하면 새 탭에서 열리는 파일 카드로 보여줍니다.
+function renderAttachmentGallery(urls) {
+  if (!urls || !urls.length) return "";
+  return `<div class="meeting-gallery">${urls.map(url => {
+    if (isImageFile(url)) {
+      return `<span class="img-zoom-wrap"><img src="${url}" class="meeting-img" data-zoom="0" loading="lazy" onclick="cycleMeetingImgZoom(this)"></span>`;
+    }
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#F4FAEF;border:1px solid var(--border);border-radius:10px;font-size:12.5px;color:var(--blue-deep);font-weight:700;text-decoration:none;max-width:220px;">
+      <span style="font-size:18px;">${fileIconFor(url)}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(fileNameFromUrl(url))}</span>
+    </a>`;
+  }).join("")}</div>`;
 }
 
 /* ===================== 사용자 정의 폴더 - 4칸 그리드 보기 (순서는 ▲▼로 직접 조정) ===================== */
@@ -971,7 +1003,9 @@ async function renderFolderGrid(section) {
   wrap.innerHTML = `<div class="folder-grid">${docs.map((d, i) => {
     const editable = canEditDoc(section, d);
     const preview = previewField ? stripHtml(d[previewField.key]) : "";
-    const thumb = imageField && d[imageField.key] && d[imageField.key][0] ? d[imageField.key][0] : "";
+    const attachments = imageField ? (d[imageField.key] || []).filter(Boolean) : [];
+    const thumbUrl = attachments[0] || "";
+    const thumbIsImage = thumbUrl && isImageFile(thumbUrl);
     const uploadDate = (d.createdAt || d.updatedAt || "").slice(0, 10);
     const metaParts = metaKeys.map(k => d[k]).filter(Boolean).map(escapeHtml);
     if (uploadDate) metaParts.push("업로드: " + escapeHtml(uploadDate));
@@ -984,7 +1018,9 @@ async function renderFolderGrid(section) {
         </div>` : ""}
       </div>
       ${metaParts.length ? `<div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px;">${metaParts.join(" · ")}</div>` : ""}
-      ${thumb ? `<img src="${thumb}" style="width:100%;height:110px;object-fit:cover;border-radius:8px;margin-bottom:8px;cursor:pointer;" data-view="${d.id}">` : ""}
+      ${thumbIsImage
+        ? `<img src="${thumbUrl}" style="width:100%;height:110px;object-fit:cover;border-radius:8px;margin-bottom:8px;cursor:pointer;" data-view="${d.id}">`
+        : (thumbUrl ? `<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;background:#F4FAEF;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer;font-size:12px;color:var(--blue-deep);font-weight:700;" data-view="${d.id}"><span style="font-size:16px;">${fileIconFor(thumbUrl)}</span><span>첨부파일 ${attachments.length}개</span></div>` : "")}
       ${preview ? `<div style="font-size:12.5px;color:var(--text-main);cursor:pointer;line-height:1.5;min-height:20px;" data-view="${d.id}">${escapeHtml(preview.slice(0, 60))}${preview.length > 60 ? "…" : ""}</div>` : ""}
       ${editable ? `<div style="margin-top:10px;display:flex;gap:10px;justify-content:flex-end;">
         <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
@@ -1049,7 +1085,7 @@ function openFolderEntryDetailModal(section, entry) {
       <h3>${escapeHtml(entry.title || "")}</h3>
       ${uploadDate ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">업로드: ${escapeHtml(uploadDate)}</div>` : ""}
       ${bodyHtml || `<p style="color:var(--text-muted);font-size:13px;">등록된 내용이 없습니다.</p>`}
-      ${images.length ? `<div class="meeting-gallery">${images.map(url => `<span class="img-zoom-wrap"><img src="${url}" class="meeting-img" data-zoom="0" loading="lazy" onclick="cycleMeetingImgZoom(this)"></span>`).join("")}</div>` : ""}
+      ${renderAttachmentGallery(images)}
       <div class="grid-2" style="margin-top:16px;">
         <button type="button" class="btn secondary" id="closeDetailBtn">닫기</button>
         ${canEdit ? `<button type="button" class="btn" id="editFromDetailBtn">수정</button>` : ""}
@@ -1112,9 +1148,11 @@ async function renderMeetingGrid(section) {
       const cell = row.cells[b.id];
       if (cell) {
         const preview = stripHtml(cell.content);
+        const imgField = section.fields.find(f => f.type === "imageUpload");
+        const hasAttachments = imgField && (cell[imgField.key] || []).length > 0;
         html += `<td style="cursor:pointer;" data-cell-row="${ri}" data-cell-branch="${b.id}">
           <div style="font-size:12px;color:var(--text-main);">${escapeHtml(preview.slice(0, 40))}${preview.length > 40 ? "…" : (preview ? "" : "(내용 없음)")}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(cell.date || "")}${extraKey && cell[extraKey] ? " · " + escapeHtml(cell[extraKey]) : ""}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(cell.date || "")}${extraKey && cell[extraKey] ? " · " + escapeHtml(cell[extraKey]) : ""}${hasAttachments ? " · 📎" : ""}</div>
         </td>`;
       } else if (canCreateForBranch(section, b.id)) {
         html += `<td style="cursor:pointer;text-align:center;color:var(--text-muted);" data-cell-new-row="${ri}" data-cell-new-branch="${b.id}">+</td>`;
@@ -1144,8 +1182,10 @@ async function renderMeetingGrid(section) {
 function openMeetingDetailModal(section, entry) {
   const root = document.getElementById("modalRoot");
   const canEdit = canEditDoc(section, entry);
+  const imageField = section.fields.find(f => f.type === "imageUpload");
+  const attachments = (imageField && entry[imageField.key]) || [];
   const fieldRows = section.fields
-    .filter(f => f.type !== "branchSelect" && f.key !== "title" && f.key !== "date")
+    .filter(f => f.type !== "branchSelect" && f.type !== "imageUpload" && f.key !== "title" && f.key !== "date")
     .map(f => {
       const val = entry[f.key];
       if (!val) return "";
@@ -1158,6 +1198,7 @@ function openMeetingDetailModal(section, entry) {
       <h3>${escapeHtml(entry.title || "")}${entry.branchName ? " · " + escapeHtml(entry.branchName) : ""}</h3>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">${escapeHtml(entry.date || "")}</div>
       ${fieldRows || `<p style="color:var(--text-muted);font-size:13px;">등록된 내용이 없습니다.</p>`}
+      ${renderAttachmentGallery(attachments)}
       <div class="grid-2" style="margin-top:10px;">
         <button type="button" class="btn secondary" id="closeDetailBtn">닫기</button>
         ${canEdit ? `<button type="button" class="btn" id="editFromDetailBtn">수정</button>` : ""}
@@ -2119,8 +2160,8 @@ function openModal(section, existing, prefill) {
       return `<div class="field">
         <label>${f.label}</label>
         <div class="image-thumbs" id="imgthumbs_${f.key}"></div>
-        <input type="file" id="imginput_${f.key}" accept="image/*" multiple>
-        <p style="font-size:12px;color:var(--text-muted);margin-top:4px;">구글 슬라이드를 이미지로 내보낸 뒤 여러 장을 한 번에 올릴 수 있어요.</p>
+        <input type="file" id="imginput_${f.key}" accept="image/*,.pdf,.ppt,.pptx,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:4px;">이미지, PDF, PPT 파일을 여러 개 한 번에 올릴 수 있어요.</p>
       </div>`;
     }
     if (f.type === "richtext") {
@@ -2154,12 +2195,15 @@ function openModal(section, existing, prefill) {
     if (!wrap) return;
     const st = imageState[key];
     const items = [
-      ...st.urls.map((url, i) => ({ type: "url", src: url, i })),
-      ...st.files.map((file, i) => ({ type: "file", src: URL.createObjectURL(file), i }))
+      ...st.urls.map((url, i) => ({ type: "url", src: url, i, isImage: isImageFile(url), name: fileNameFromUrl(url) })),
+      ...st.files.map((file, i) => ({ type: "file", src: URL.createObjectURL(file), i, isImage: file.type.startsWith("image/"), name: file.name }))
     ];
     wrap.innerHTML = items.length
-      ? items.map(it => `<div class="thumb-item"><img src="${it.src}"><button type="button" class="thumb-remove" data-type="${it.type}" data-i="${it.i}">×</button></div>`).join("")
-      : `<p style="font-size:12px;color:var(--text-muted);">등록된 이미지가 없습니다.</p>`;
+      ? items.map(it => `<div class="thumb-item">${it.isImage
+          ? `<img src="${it.src}">`
+          : `<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:#F4FAEF;border-radius:8px;border:1px solid var(--border);overflow:hidden;padding:2px;"><span style="font-size:20px;">${fileIconFor(it.name)}</span><span style="font-size:8px;color:var(--text-muted);text-align:center;word-break:break-all;line-height:1.1;">${escapeHtml((it.name || "").slice(0, 14))}</span></div>`
+        }<button type="button" class="thumb-remove" data-type="${it.type}" data-i="${it.i}">×</button></div>`).join("")
+      : `<p style="font-size:12px;color:var(--text-muted);">등록된 파일이 없습니다.</p>`;
     wrap.querySelectorAll(".thumb-remove").forEach(btn => {
       btn.onclick = () => {
         const i = parseInt(btn.dataset.i, 10);
