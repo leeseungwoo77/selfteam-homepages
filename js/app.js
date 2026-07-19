@@ -37,7 +37,7 @@ const SECTIONS = [
   { key:"directorMeeting", label:"지점 원장 미팅 일지", group:"일정·미팅", color:"green",
     collectionName:"directorMeetings", scope:"branch", writable:"leader",
     desc:"지점 원장님과의 미팅 내용을 기록합니다. (팀장만 열람 가능)",
-    hasBranchSubmenu:true, leaderOnly:true, isMeetingGrid:true, headerFields:["title","date","branchName","director"],
+    leaderOnly:true, isMeetingGrid:true, headerFields:["title","date","branchName","director"],
     fields:[
       { key:"title", label:"제목", type:"text" },
       { key:"date", label:"날짜", type:"date" },
@@ -50,7 +50,7 @@ const SECTIONS = [
   { key:"memberMeeting", label:"지점 팀원 개별 미팅 일지", group:"일정·미팅", color:"green",
     collectionName:"memberMeetings", scope:"branch", writable:"leader-and-branch",
     desc:"지점 팀원과의 개별 미팅 내용을 기록합니다.",
-    hasBranchSubmenu:true, cardView:true, headerFields:["title","date","branchName","memberName"],
+    isMeetingGrid:true, headerFields:["title","date","branchName","memberName"],
     fields:[
       { key:"title", label:"제목", type:"text" },
       { key:"date", label:"날짜", type:"date" },
@@ -963,6 +963,7 @@ async function renderMeetingGrid(section) {
   if (!rows.length) { wrap.innerHTML = `<div class="empty-state">등록된 미팅 기록이 없습니다.</div>`; return; }
 
   const stripHtml = (html) => (html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const extraKey = (section.headerFields || []).find(k => !["title", "date", "branchName"].includes(k));
 
   let html = `<table class="table-compact"><thead><tr><th style="min-width:130px;">미팅</th>
     ${branchesSorted.map(b => `<th style="min-width:150px;">${escapeHtml(b.name)}</th>`).join("")}
@@ -976,7 +977,7 @@ async function renderMeetingGrid(section) {
         const preview = stripHtml(cell.content);
         html += `<td style="cursor:pointer;" data-cell-row="${ri}" data-cell-branch="${b.id}">
           <div style="font-size:12px;color:var(--text-main);">${escapeHtml(preview.slice(0, 40))}${preview.length > 40 ? "…" : (preview ? "" : "(내용 없음)")}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(cell.date || "")}${cell.director ? " · " + escapeHtml(cell.director) : ""}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(cell.date || "")}${extraKey && cell[extraKey] ? " · " + escapeHtml(cell[extraKey]) : ""}</div>
         </td>`;
       } else if (canCreateForBranch(section, b.id)) {
         html += `<td style="cursor:pointer;text-align:center;color:var(--text-muted);" data-cell-new-row="${ri}" data-cell-new-branch="${b.id}">+</td>`;
