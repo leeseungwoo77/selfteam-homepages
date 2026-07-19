@@ -1628,19 +1628,24 @@ function openRosterCellModal(branch, data, personIdx, yearIdx) {
 }
 
 /* ===================== OKR 폴더 (시즌 · Objective · KR · KT) ===================== */
+const SEASON_DEFS = [
+  { n: 1, label: "1시즌 (3~5월)" },
+  { n: 2, label: "2시즌 (6~8월)" },
+  { n: 3, label: "3시즌 (9~11월)" },
+  { n: 4, label: "4시즌 (12~2월)" }
+];
+function seasonLabel(year, seasonDef) { return `${year}년 ${seasonDef.label}`; }
 function seasonOptions() {
-  const seasons = [
-    { n: 1, label: "1시즌 (3~5월)" },
-    { n: 2, label: "2시즌 (6~8월)" },
-    { n: 3, label: "3시즌 (9~11월)" },
-    { n: 4, label: "4시즌 (12~2월)" }
-  ];
   const thisYear = new Date().getFullYear();
   const opts = [];
   for (let y = thisYear - 1; y <= thisYear + 1; y++) {
-    seasons.forEach(s => opts.push(`${y}년 ${s.label}`));
+    SEASON_DEFS.forEach(s => opts.push(seasonLabel(y, s)));
   }
   return opts;
+}
+function extractSeasonYear(season) {
+  const m = String(season || "").match(/(\d{4})년/);
+  return m ? parseInt(m[1], 10) : null;
 }
 
 function parseSeasonKey(season) {
@@ -1649,109 +1654,148 @@ function parseSeasonKey(season) {
   return parseInt(m[1], 10) * 10 + parseInt(m[2], 10);
 }
 
+// KT(Key Task)는 예전엔 문자열만 저장했지만, 이제 { text, score(1~5) } 형태로 저장합니다.
+// 예전 데이터(문자열)도 그대로 읽을 수 있도록 변환해줍니다.
+function normalizeKts(kts) {
+  return (kts || []).map(kt => typeof kt === "string" ? { text: kt, score: 0 } : (kt || { text: "", score: 0 }));
+}
+// KR 달성율 = 그 KR에 속한 KT들의 점수(1~5) 평균을 100점 만점으로 환산한 값
+function krAchievement(kr) {
+  const kts = normalizeKts(kr && kr.kts).filter(kt => (kt.text || "").trim() && kt.score);
+  if (!kts.length) return 0;
+  const avg = kts.reduce((s, kt) => s + Number(kt.score || 0), 0) / kts.length;
+  return Math.round((avg / 5) * 100);
+}
+// 종합 달성율 = KR들의 달성율 평균
+function overallAchievement(krs) {
+  if (!krs || !krs.length) return 0;
+  return Math.round(krs.reduce((s, k) => s + krAchievement(k), 0) / krs.length);
+}
+
 async function renderOkrFolder(section) {
   const main = document.getElementById("mainContent");
+  const thisYear = new Date().getFullYear();
   main.innerHTML = `<div class="page-header">
       <div>
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
         <p>${section.desc}</p>
       </div>
-      ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새 OKR 등록</button>` : ""}
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="okrYearSelect" style="width:auto;padding:8px 10px;border:1.5px solid var(--border);border-radius:10px;font-family:var(--font-display);font-weight:700;"></select>
+        ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새 OKR 등록</button>` : ""}
+      </div>
     </div>
-    <div id="okrList">불러오는 중...</div>`;
+    <div class="card" style="overflow-x:auto;"><div id="okrGridWrap">불러오는 중...</div></div>`;
 
   if (canWriteSection(section)) {
     document.getElementById("addBtn").onclick = () => openOkrModal(section, null);
   }
 
   const docs = await fetchDocs(section);
-  docs.sort((a, b) => parseSeasonKey(b.season) - parseSeasonKey(a.season));
-  const wrap = document.getElementById("okrList");
-  if (!docs.length) {
-    wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>아직 등록된 OKR이 없습니다.</div></div>`;
-    return;
-  }
 
-  wrap.innerHTML = docs.map(d => {
-    const editable = canEditDoc(section, d);
-    const krs = d.krs || [];
-    const overall = krs.length ? Math.round(krs.reduce((s, k) => s + (k.achievement || 0), 0) / krs.length) : 0;
-    const objectivePreview = (d.objective || "").slice(0, 50) + ((d.objective || "").length > 50 ? "…" : "");
-    const branchTag = d.branchName ? escapeHtml(d.branchName) + " · " : "";
-    return `<div class="card meeting-card">
-      <div class="log-summary" data-toggle="${d.id}">
-        <div>
-          <div style="font-weight:800;font-size:15px;">${escapeHtml(d.season || "")}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${branchTag}${escapeHtml(objectivePreview)} · 종합 달성율 ${overall}%<span class="log-chevron">›</span></div>
-        </div>
-        ${editable ? `<div>
-          <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
-          <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
-        </div>` : ""}
-      </div>
-      <div class="log-body" id="body_${d.id}">
-        <p style="margin:0 0 14px;"><strong>Objective</strong><br>${escapeHtml(d.objective || "").replace(/\n/g, "<br>")}</p>
-        ${krs.map((k, i) => `
-          <div style="margin:0 0 12px;padding:12px 14px;background:#FBFEFA;border-radius:10px;border:1px solid var(--border);">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-              <strong style="font-size:13.5px;">KR${i + 1}. ${escapeHtml(k.title || "")}</strong>
-              <span class="mono" style="font-weight:700;color:var(--green-deep);white-space:nowrap;">${k.achievement || 0}%</span>
-            </div>
-            <div style="background:#EAF3E3;border-radius:6px;height:8px;margin:8px 0;overflow:hidden;">
-              <div style="background:var(--green-bright);height:100%;width:${k.achievement || 0}%;"></div>
-            </div>
-            ${(k.kts || []).length ? `<ul style="margin:6px 0 0 18px;font-size:13px;line-height:1.6;">${(k.kts || []).map(kt => `<li>${escapeHtml(kt)}</li>`).join("")}</ul>` : ""}
-          </div>`).join("")}
-      </div>
-    </div>`;
-  }).join("");
+  const docYears = docs.map(d => extractSeasonYear(d.season)).filter(Boolean);
+  const years = [...new Set([thisYear - 1, thisYear, thisYear + 1, thisYear + 2, ...docYears])].sort((a, b) => b - a);
+  const yearSelect = document.getElementById("okrYearSelect");
+  yearSelect.innerHTML = years.map(y => `<option value="${y}" ${y === thisYear ? "selected" : ""}>${y}년</option>`).join("");
+  yearSelect.onchange = () => renderOkrGridBody(section, docs, parseInt(yearSelect.value, 10));
 
-  wrap.querySelectorAll(".log-summary").forEach(el => {
-    el.onclick = () => {
-      const body = document.getElementById(`body_${el.dataset.toggle}`);
-      const opening = !body.classList.contains("open");
-      body.classList.toggle("open", opening);
-      el.classList.toggle("open", opening);
-    };
+  renderOkrGridBody(section, docs, thisYear);
+}
+
+function renderOkrGridBody(section, docs, year) {
+  const wrap = document.getElementById("okrGridWrap");
+  const escapeMultiline = (s) => escapeHtml(s || "").replace(/\n/g, "<br>");
+
+  const columns = SEASON_DEFS.map(sd => {
+    const label = seasonLabel(year, sd);
+    const matches = docs.filter(d => d.season === label).sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+    return { label, sd, doc: matches[0] || null };
   });
-  wrap.querySelectorAll('[data-act="edit"]').forEach(btn => {
-    btn.onclick = (e) => { e.stopPropagation(); openOkrModal(section, docs.find(d => d.id === btn.dataset.id)); };
+
+  let html = `<table style="min-width:900px;"><thead><tr>
+    <th style="min-width:90px;">구분</th>
+    ${columns.map(c => `<th style="min-width:220px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+        <span>${c.sd.label}</span>
+        ${c.doc
+          ? (canEditDoc(section, c.doc) ? `<span style="white-space:nowrap;"><button class="icon-btn" data-edit-okr="${c.doc.id}">수정</button><button class="icon-btn danger" data-del-okr="${c.doc.id}">삭제</button></span>` : "")
+          : (canWriteSection(section) ? `<button class="icon-btn" data-new-okr="${escapeHtml(c.label)}">+ 등록</button>` : "")}
+      </div>
+    </th>`).join("")}
+  </tr></thead><tbody>
+    <tr><td style="font-weight:700;">Objective</td>
+      ${columns.map(c => `<td>${c.doc && c.doc.objective ? escapeMultiline(c.doc.objective) : `<span style="color:var(--text-muted);">-</span>`}</td>`).join("")}
+    </tr>
+    ${[0, 1, 2].map(i => `<tr><td style="font-weight:700;vertical-align:top;">KR${i + 1}</td>
+      ${columns.map(c => {
+        const kr = c.doc && (c.doc.krs || [])[i];
+        if (!kr || !kr.title) return `<td><span style="color:var(--text-muted);">-</span></td>`;
+        const ach = krAchievement(kr);
+        const kts = normalizeKts(kr.kts).filter(kt => (kt.text || "").trim());
+        return `<td>
+          <div style="font-size:13px;font-weight:700;margin-bottom:4px;">${escapeHtml(kr.title)}</div>
+          <div style="background:#EAF3E3;border-radius:6px;height:8px;margin:6px 0;overflow:hidden;"><div style="background:var(--green-bright);height:100%;width:${ach}%;"></div></div>
+          <div class="mono" style="font-size:12px;color:var(--green-deep);font-weight:700;">${ach}%</div>
+          ${kts.length ? `<ul style="margin:6px 0 0 16px;font-size:12px;line-height:1.6;">${kts.map(kt => `<li>${escapeHtml(kt.text)} <span class="mono" style="color:var(--text-muted);">(${kt.score || 0}점)</span></li>`).join("")}</ul>` : ""}
+        </td>`;
+      }).join("")}
+    </tr>`).join("")}
+    <tr><td style="font-weight:700;">종합 달성율</td>
+      ${columns.map(c => `<td class="mono" style="font-weight:800;color:var(--blue-deep);">${c.doc ? overallAchievement(c.doc.krs || []) + "%" : "-"}</td>`).join("")}
+    </tr>
+  </tbody></table>`;
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll("[data-edit-okr]").forEach(btn => {
+    btn.onclick = () => openOkrModal(section, docs.find(d => d.id === btn.dataset.editOkr));
   });
-  wrap.querySelectorAll('[data-act="del"]').forEach(btn => {
-    btn.onclick = async (e) => {
-      e.stopPropagation();
+  wrap.querySelectorAll("[data-del-okr]").forEach(btn => {
+    btn.onclick = async () => {
       if (!confirm("정말 삭제하시겠습니까?")) return;
-      await deleteDoc(doc(db, "folderEntries", btn.dataset.id));
+      await deleteDoc(doc(db, "folderEntries", btn.dataset.delOkr));
       showToast("삭제되었습니다.");
       renderSection(section.key);
     };
   });
+  wrap.querySelectorAll("[data-new-okr]").forEach(btn => {
+    btn.onclick = () => openOkrModal(section, null, btn.dataset.newOkr);
+  });
 }
 
 function krBlockHtml(i, kr) {
-  const k = kr || { title: "", achievement: 0, kts: [] };
+  const k = kr || { title: "", kts: [] };
+  const kts = normalizeKts(k.kts);
   return `<div class="card" style="background:#FBFEFA;margin-bottom:12px;padding:16px;">
     <h2 style="font-size:14px;margin:0 0 12px;">Key Result ${i + 1}</h2>
     <div class="field"><label>KR${i + 1} 내용 (정량적 목표)</label><input type="text" id="krTitle_${i}" value="${escapeHtml(k.title || "")}"></div>
-    <div class="field"><label>달성율 (%)</label><input type="number" id="krAch_${i}" min="0" max="100" value="${k.achievement || 0}"></div>
     <div class="field"><label>Key Task (최대 3개)</label>
-      ${[0, 1, 2].map(j => `<input type="text" id="kt_${i}_${j}" placeholder="KT ${j + 1}" value="${escapeHtml((k.kts && k.kts[j]) || "")}" style="margin-bottom:6px;">`).join("")}
+      <p style="font-size:11px;color:var(--text-muted);margin:0 0 8px;">KT마다 1~5점으로 점수를 매기면, 평균을 100점 만점으로 환산해서 이 KR의 달성율이 자동 계산돼요.</p>
+      ${[0, 1, 2].map(j => `<div style="display:flex;gap:8px;margin-bottom:6px;">
+        <input type="text" id="kt_${i}_${j}" placeholder="KT ${j + 1}" value="${escapeHtml(kts[j] ? kts[j].text || "" : "")}" style="flex:1;">
+        <select id="ktScore_${i}_${j}" style="width:90px;">
+          <option value="">점수</option>
+          ${[1, 2, 3, 4, 5].map(v => `<option value="${v}" ${kts[j] && Number(kts[j].score) === v ? "selected" : ""}>${v}점</option>`).join("")}
+        </select>
+      </div>`).join("")}
     </div>
+    <p style="font-size:12px;color:var(--text-muted);margin:0;">이 KR 예상 달성율: <span id="krAchPreview_${i}" class="mono" style="font-weight:700;">${krAchievement(k)}%</span></p>
   </div>`;
 }
 
-function openOkrModal(section, existing) {
+function openOkrModal(section, existing, prefillSeason) {
   const root = document.getElementById("modalRoot");
   const seasons = seasonOptions();
   const krs = (existing && existing.krs) || [{}, {}, {}];
   const needsBranch = section.visibility === "branch";
+  const selectedSeason = (existing && existing.season) || prefillSeason || "";
+  const seasonOpts = seasons.includes(selectedSeason) || !selectedSeason ? seasons : [selectedSeason, ...seasons];
 
   root.innerHTML = `<div class="modal-bg" id="modalBg">
     <div class="modal" style="max-width:560px;">
       <h3>${existing ? "수정" : "새 OKR 등록"} · ${section.label}</h3>
       <form id="okrForm">
         <div class="field"><label>시즌</label>
-          <select id="okrSeason">${seasons.map(s => `<option value="${s}" ${existing && existing.season === s ? "selected" : ""}>${s}</option>`).join("")}</select>
+          <select id="okrSeason">${seasonOpts.map(s => `<option value="${s}" ${selectedSeason === s ? "selected" : ""}>${s}</option>`).join("")}</select>
         </div>
         ${needsBranch ? `<div class="field"><label>지점</label>${fieldInput({ key: "branchId", type: "branchSelect" }, existing ? existing.branchId : "")}</div>` : ""}
         <div class="field"><label>Objective (목적 · 정성적 서술)</label><textarea id="okrObjective" rows="2">${escapeHtml((existing && existing.objective) || "")}</textarea></div>
@@ -1766,6 +1810,24 @@ function openOkrModal(section, existing) {
   document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
   document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
 
+  // KT 텍스트/점수를 바꿀 때마다 예상 달성율을 바로 다시 계산해서 보여줍니다.
+  [0, 1, 2].forEach(i => {
+    const updatePreview = () => {
+      const kr = {
+        kts: [0, 1, 2].map(j => ({
+          text: document.getElementById(`kt_${i}_${j}`).value,
+          score: document.getElementById(`ktScore_${i}_${j}`).value
+        }))
+      };
+      const el = document.getElementById(`krAchPreview_${i}`);
+      if (el) el.textContent = krAchievement(kr) + "%";
+    };
+    [0, 1, 2].forEach(j => {
+      document.getElementById(`kt_${i}_${j}`).addEventListener("input", updatePreview);
+      document.getElementById(`ktScore_${i}_${j}`).addEventListener("change", updatePreview);
+    });
+  });
+
   document.getElementById("okrForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const saveBtn = document.getElementById("saveBtn");
@@ -1776,8 +1838,10 @@ function openOkrModal(section, existing) {
       const objective = document.getElementById("okrObjective").value.trim();
       const krsData = [0, 1, 2].map(i => ({
         title: document.getElementById(`krTitle_${i}`).value.trim(),
-        achievement: Math.max(0, Math.min(100, parseInt(document.getElementById(`krAch_${i}`).value, 10) || 0)),
-        kts: [0, 1, 2].map(j => document.getElementById(`kt_${i}_${j}`).value.trim()).filter(Boolean)
+        kts: [0, 1, 2].map(j => ({
+          text: document.getElementById(`kt_${i}_${j}`).value.trim(),
+          score: parseInt(document.getElementById(`ktScore_${i}_${j}`).value, 10) || 0
+        }))
       }));
       const data = {
         folderId: section.folderId, season, objective, krs: krsData,
