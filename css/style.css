@@ -182,6 +182,11 @@ td.actions { white-space: nowrap; text-align: right; }
 .pill.normal { background: #EAF3E3; color: var(--green-deep); }
 
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 14px; margin-bottom: 20px; }
+
+.folder-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 20px; }
+.folder-grid-card { padding: 14px; }
+@media (max-width: 1200px) { .folder-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 900px) { .folder-grid { grid-template-columns: repeat(2, 1fr); } }
 .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
 .stat-card .label { font-size: 12px; color: var(--text-muted); font-weight: 700; }
 .stat-card .value { font-family: var(--font-mono); font-size: 24px; font-weight: 700; margin-top: 6px; color: var(--blue-deep); }
@@ -245,6 +250,7 @@ td.actions { white-space: nowrap; text-align: right; }
 .nav-toggle-btn { display: none; }
 
 @media (max-width: 860px) {
+  .folder-grid { grid-template-columns: 1fr; }
   .app { flex-direction: column; }
   .sidebar { width: 100%; padding: 16px; }
   .sidebar-logo { position: relative; padding-bottom: 12px; }

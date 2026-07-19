@@ -723,6 +723,7 @@ async function renderSection(key) {
   if (section.isOkr) { renderOkrFolder(section); return; }
   if (section.isRosterGrid) { renderRosterGrid(section); return; }
   if (section.isMeetingGrid) { renderMeetingGrid(section); return; }
+  if (section.cardView && section.scope === "custom") { renderFolderGrid(section); return; }
   if (section.cardView) { renderLogCards(section); return; }
 
   const branchId = state.branchFilter[section.key];
@@ -923,7 +924,117 @@ async function renderLogCards(section) {
   });
 }
 
-/* ===================== 지점 x 미팅 그리드 (가로: 지점, 세로: 제목/주차별 미팅) ===================== */
+/* ===================== 사용자 정의 폴더 - 4칸 그리드 보기 (순서는 ▲▼로 직접 조정) ===================== */
+async function renderFolderGrid(section) {
+  const main = document.getElementById("mainContent");
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <p>${section.desc}</p>
+      </div>
+      ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
+    </div>
+    <div id="folderGridWrap">불러오는 중...</div>`;
+
+  if (canWriteSection(section)) {
+    document.getElementById("addBtn").onclick = () => openModal(section, null);
+  }
+
+  const docs = await fetchDocs(section);
+  // order 값이 있으면 그 순서대로(작은 값이 먼저), 없는 예전 게시물은 뒤로 보내고 최신순으로 정렬합니다.
+  docs.sort((a, b) => {
+    const oa = a.order !== undefined ? a.order : Infinity;
+    const ob = b.order !== undefined ? b.order : Infinity;
+    if (oa !== ob) return oa - ob;
+    return (b.createdAt || "").localeCompare(a.createdAt || "");
+  });
+
+  const wrap = document.getElementById("folderGridWrap");
+  if (!docs.length) {
+    wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>아직 등록된 게시물이 없습니다.</div></div>`;
+    return;
+  }
+
+  const stripHtml = (html) => (html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+
+  wrap.innerHTML = `<div class="folder-grid">${docs.map((d, i) => {
+    const editable = canEditDoc(section, d);
+    const preview = stripHtml(d.content);
+    const thumb = (d.images && d.images[0]) ? d.images[0] : "";
+    const uploadDate = (d.createdAt || d.updatedAt || "").slice(0, 10);
+    return `<div class="card folder-grid-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
+        <div style="font-weight:800;font-size:14px;cursor:pointer;flex:1;" data-view="${d.id}">${escapeHtml(d.title || "(제목 없음)")}</div>
+        ${editable ? `<div style="display:flex;flex-direction:column;">
+          <button class="icon-btn" style="padding:0 4px;line-height:1.3;" data-move="up" data-id="${d.id}" ${i === 0 ? "disabled" : ""}>▲</button>
+          <button class="icon-btn" style="padding:0 4px;line-height:1.3;" data-move="down" data-id="${d.id}" ${i === docs.length - 1 ? "disabled" : ""}>▼</button>
+        </div>` : ""}
+      </div>
+      ${uploadDate ? `<div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px;">업로드: ${escapeHtml(uploadDate)}</div>` : ""}
+      ${thumb ? `<img src="${thumb}" style="width:100%;height:110px;object-fit:cover;border-radius:8px;margin-bottom:8px;cursor:pointer;" data-view="${d.id}">` : ""}
+      <div style="font-size:12.5px;color:var(--text-main);cursor:pointer;line-height:1.5;min-height:20px;" data-view="${d.id}">${escapeHtml(preview.slice(0, 60))}${preview.length > 60 ? "…" : ""}</div>
+      ${editable ? `<div style="margin-top:10px;display:flex;gap:10px;justify-content:flex-end;">
+        <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
+        <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
+      </div>` : ""}
+    </div>`;
+  }).join("")}</div>`;
+
+  wrap.querySelectorAll("[data-view]").forEach(el => {
+    el.onclick = () => openFolderEntryDetailModal(section, docs.find(d => d.id === el.dataset.view));
+  });
+  wrap.querySelectorAll('[data-act="edit"]').forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); openModal(section, docs.find(d => d.id === btn.dataset.id)); };
+  });
+  wrap.querySelectorAll('[data-act="del"]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm("정말 삭제하시겠습니까?")) return;
+      await deleteDoc(doc(db, section.collectionName, btn.dataset.id));
+      showToast("삭제되었습니다.");
+      renderSection(section.key);
+    };
+  });
+  wrap.querySelectorAll("[data-move]").forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); moveFolderEntry(section, docs, btn.dataset.id, btn.dataset.move); };
+  });
+}
+
+async function moveFolderEntry(section, entries, id, direction) {
+  const index = entries.findIndex(e => e.id === id);
+  const swapWith = direction === "up" ? index - 1 : index + 1;
+  if (swapWith < 0 || swapWith >= entries.length) return;
+  // 두 항목의 order 값을 그냥 맞바꾸지 않고, 전체를 0,1,2...로 다시 매겨서
+  // 예전 게시물처럼 order가 아예 없던 경우에도 클릭 즉시 확실히 반영되게 합니다.
+  const reordered = [...entries];
+  [reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]];
+  await Promise.all(reordered.map((e, i) => updateDoc(doc(db, "folderEntries", e.id), { order: i })));
+  renderSection(section.key);
+}
+
+function openFolderEntryDetailModal(section, entry) {
+  const root = document.getElementById("modalRoot");
+  const canEdit = canEditDoc(section, entry);
+  const images = entry.images || [];
+  const uploadDate = (entry.createdAt || entry.updatedAt || "").slice(0, 10);
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal" style="max-width:640px;">
+      <h3>${escapeHtml(entry.title || "")}</h3>
+      ${uploadDate ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">업로드: ${escapeHtml(uploadDate)}</div>` : ""}
+      <div class="rich-content" style="margin-bottom:14px;">${sanitizeRichHtml(entry.content || "")}</div>
+      ${entry.link ? `<p style="margin-bottom:14px;"><a href="${escapeHtml(entry.link)}" target="_blank" rel="noopener" style="color:var(--blue-deep);font-weight:700;">첨부 링크 열기 ↗</a></p>` : ""}
+      ${images.length ? `<div class="meeting-gallery">${images.map(url => `<span class="img-zoom-wrap"><img src="${url}" class="meeting-img" data-zoom="0" loading="lazy" onclick="cycleMeetingImgZoom(this)"></span>`).join("")}</div>` : ""}
+      <div class="grid-2" style="margin-top:16px;">
+        <button type="button" class="btn secondary" id="closeDetailBtn">닫기</button>
+        ${canEdit ? `<button type="button" class="btn" id="editFromDetailBtn">수정</button>` : ""}
+      </div>
+    </div></div>`;
+  document.getElementById("closeDetailBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  if (canEdit) {
+    document.getElementById("editFromDetailBtn").onclick = () => openModal(section, entry);
+  }
+}
 async function renderMeetingGrid(section) {
   const main = document.getElementById("mainContent");
   main.innerHTML = `<div class="page-header">
@@ -2080,6 +2191,7 @@ function openModal(section, existing, prefill) {
       }
       if (section.scope === "custom") {
         data.folderId = section.folderId;
+        if (!existing) data.order = Date.now();
       }
       data.updatedAt = new Date().toISOString();
       data.updatedBy = state.profile.name;
