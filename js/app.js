@@ -61,7 +61,7 @@ const SECTIONS = [
     ], columns:["date","branchName","memberName"] },
 
   { key:"performance", label:"지점 성과 지표", group:"성과·전략", color:"blue",
-    desc:"손익계산서 · 인사평가 등 평가지표 시트를 그대로 보여줍니다.",
+    desc:"고객지표 · 경영지표 등 평가지표를 그대로 보여줍니다.",
     isEvalSheet:true },
 
   { key:"notice", label:"팀 공지사항", group:"소통·협업", color:"magenta",
@@ -1042,6 +1042,8 @@ function openMeetingDetailModal(section, entry) {
   }
 }
 const EVAL_SPREADSHEET_ID = "1TA3ObFLBQGb9dmKlOEL4XxPmE308ifyOPhxzEzAe-I8";
+// 처음 한 번은 이 기본 링크로 "고객지표" 버튼이 보이고, 팀장이 "수정"으로 바꾸면 그 뒤로는 Firestore에 저장된 링크를 사용합니다.
+const CUSTOMER_INDEX_DEFAULT_URL = "https://docs.google.com/spreadsheets/d/1uequoelbdG3zLzo-FgqbDsPIlb7NGFIasS_82ZzE6iA/edit?gid=866382572#gid=866382572";
 
 function openSimpleLinkModal(title, currentUrl, onSave) {
   const root = document.getElementById("modalRoot");
@@ -1069,10 +1071,15 @@ function openSimpleLinkModal(title, currentUrl, onSave) {
 async function renderEvalSheet(section) {
   const main = document.getElementById("mainContent");
   let plUrl = "";
+  let customerUrl = "";
   try {
     const plDoc = await getDoc(doc(db, "siteLinks", "plStatement"));
     if (plDoc.exists()) plUrl = plDoc.data().url || "";
   } catch (err) { /* 무시 */ }
+  try {
+    const custDoc = await getDoc(doc(db, "siteLinks", "customerIndex"));
+    customerUrl = custDoc.exists() && custDoc.data().url ? custDoc.data().url : CUSTOMER_INDEX_DEFAULT_URL;
+  } catch (err) { customerUrl = CUSTOMER_INDEX_DEFAULT_URL; }
 
   main.innerHTML = `<div class="page-header">
       <div>
@@ -1080,6 +1087,9 @@ async function renderEvalSheet(section) {
         <p>${section.desc}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
+        ${customerUrl
+          ? `<a href="${escapeHtml(customerUrl)}" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">고객지표</a>${state.profile.role === "leader" ? `<button class="icon-btn" id="editCustomerLinkBtn" type="button">수정</button>` : ""}`
+          : (state.profile.role === "leader" ? `<button class="btn small secondary" id="editCustomerLinkBtn" type="button">+ 고객지표 링크 설정</button>` : "")}
         ${plUrl
           ? `<a href="${escapeHtml(plUrl)}" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">손익계산서</a>${state.profile.role === "leader" ? `<button class="icon-btn" id="editPlLinkBtn" type="button">수정</button>` : ""}`
           : (state.profile.role === "leader" ? `<button class="btn small secondary" id="editPlLinkBtn" type="button">+ 손익계산서 링크 설정</button>` : "")}
@@ -1100,6 +1110,20 @@ async function renderEvalSheet(section) {
       <div id="evalSheetList" style="margin-top:14px;"></div>
     </div>` : ""}
     <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="evalSheetWrap">불러오는 중...</div></div>`;
+
+  if (document.getElementById("editCustomerLinkBtn")) {
+    document.getElementById("editCustomerLinkBtn").onclick = () => {
+      openSimpleLinkModal("고객지표 링크 설정", customerUrl, async (url) => {
+        try {
+          await setDoc(doc(db, "siteLinks", "customerIndex"), { url, updatedAt: new Date().toISOString(), updatedBy: state.profile.name });
+          showToast("저장되었습니다.");
+          renderSection(section.key);
+        } catch (err) {
+          alert("저장 중 오류: " + err.message);
+        }
+      });
+    };
+  }
 
   if (document.getElementById("editPlLinkBtn")) {
     document.getElementById("editPlLinkBtn").onclick = () => {
