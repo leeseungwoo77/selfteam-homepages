@@ -121,10 +121,21 @@ const LOCATION_COLORS = {
   "에듀본사": "#E03C3C", "상상": "#F5A623", "전능": "#3B9BE8", "전농": "#3B9BE8",
   "돈암": "#3FA33F", "행당": "#D3339C", "별내": "#E8D227", "다산": "#8E1E1E"
 };
+// 배경색이 밝아서 흰 글씨는 잘 안 보이는 지점은 검정 글씨로 표시합니다.
+const LOCATION_TEXT_COLORS = {
+  "돈암": "#000000", "별내": "#000000"
+};
 function matchLocationColor(str) {
   if (LOCATION_COLORS[str]) return LOCATION_COLORS[str];
   for (const key of Object.keys(LOCATION_COLORS)) {
     if (str.includes(key)) return LOCATION_COLORS[key];
+  }
+  return null;
+}
+function matchLocationTextColor(str) {
+  if (LOCATION_TEXT_COLORS[str]) return LOCATION_TEXT_COLORS[str];
+  for (const key of Object.keys(LOCATION_TEXT_COLORS)) {
+    if (str.includes(key)) return LOCATION_TEXT_COLORS[key];
   }
   return null;
 }
@@ -210,7 +221,8 @@ function computeScheduleCellStyle(text, explicitColor, explicitTextColor) {
     }
   }
   const bg = text ? matchLocationColor(text) : null;
-  return { bg, color: bg ? "#fff" : "inherit" };
+  const textColor = text ? matchLocationTextColor(text) : null;
+  return { bg, color: bg ? (textColor || "#fff") : "inherit" };
 }
 
 function findAdjacentCell(input, direction) {
@@ -319,7 +331,8 @@ async function renderMonthlySchedule(section) {
   // 지점별 특이사항 행
   SCHEDULE_NOTE_ROWS.forEach(rowLabel => {
     const rowColor = LOCATION_COLORS[rowLabel] || "#9CA88F";
-    html += `<tr><td style="${leftLabelStyle}background:${rowColor};color:#fff;">${escapeHtml(rowLabel)}</td>`;
+    const rowTextColor = LOCATION_TEXT_COLORS[rowLabel] || "#fff";
+    html += `<tr><td style="${leftLabelStyle}background:${rowColor};color:${rowTextColor};">${escapeHtml(rowLabel)}</td>`;
     dates.forEach(d => { html += cellHtml(ymd(year, month, d), "note_" + rowLabel); });
     html += `</tr>`;
   });
