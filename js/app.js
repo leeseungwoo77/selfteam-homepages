@@ -118,8 +118,8 @@ const COLOR_HEX = { blue:"var(--blue-bright)", green:"var(--green-bright)", mage
 const GOOGLE_CLIENT_ID = "708745145673-j0ljnhqsl7gg0djq5p9j7uop040thqbe.apps.googleusercontent.com";
 const GOOGLE_SCOPES = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.readonly";
 const LOCATION_COLORS = {
-  "에듀본사": "#E03C3C", "상상": "#F5A623", "전능": "#3B9BE8", "전농": "#3B9BE8",
-  "돈암": "#3FA33F", "행당": "#D3339C", "별내": "#E8D227", "다산": "#8E1E1E"
+  "에듀본사": "#E03C3C", "상상": "#F5A623", "전능": "#2979FF", "전농": "#2979FF",
+  "돈암": "#00C853", "행당": "#D3339C", "별내": "#FFD600", "다산": "#8E1E1E"
 };
 // 배경색이 밝아서 흰 글씨는 잘 안 보이는 지점은 검정 글씨로 표시합니다.
 const LOCATION_TEXT_COLORS = {
