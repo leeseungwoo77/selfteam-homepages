@@ -1970,7 +1970,7 @@ function renderOkrGridBody(section, docs, year) {
           <div style="font-size:17px;font-weight:700;margin-bottom:6px;line-height:1.4;">${escapeHtml(kr.title)}</div>
           <div style="background:#FFFFFFAA;border-radius:6px;height:8px;margin:6px 0;overflow:hidden;"><div style="background:var(--green-bright);height:100%;width:${ach}%;"></div></div>
           <div class="mono" style="font-size:16px;color:var(--green-deep);font-weight:700;">${ach}%</div>
-          ${kts.length ? `<ul style="margin:6px 0 0 18px;font-size:15px;line-height:1.6;">${kts.map(kt => `<li>${escapeHtml(kt.text)} <span class="mono" style="color:var(--text-muted);">(${kt.score || 0}점)</span></li>`).join("")}</ul>` : ""}
+          ${kts.length ? `<ul style="margin:6px 0 0 18px;font-size:15px;line-height:1.6;">${kts.map(kt => `<li>${escapeHtml(kt.text).replace(/\n/g, "<br>")} <span class="mono" style="color:var(--text-muted);">(${kt.score || 0}점)</span></li>`).join("")}</ul>` : ""}
         </td>`;
       }).join("")}
     </tr>`).join("")}
@@ -2005,7 +2005,7 @@ function krBlockHtml(i, kr) {
     <div class="field"><label>Key Task (최대 3개)</label>
       <p style="font-size:11px;color:var(--text-muted);margin:0 0 8px;">KT마다 1~5점으로 점수를 매기면, 평균을 100점 만점으로 환산해서 이 KR의 달성율이 자동 계산돼요.</p>
       ${[0, 1, 2].map(j => `<div style="display:flex;gap:8px;margin-bottom:6px;">
-        <input type="text" id="kt_${i}_${j}" placeholder="KT ${j + 1}" value="${escapeHtml(kts[j] ? kts[j].text || "" : "")}" style="flex:1;">
+        <textarea id="kt_${i}_${j}" placeholder="KT ${j + 1}" rows="2" style="flex:1;resize:vertical;font-family:var(--font-display);font-size:14px;padding:11px 12px;border:1.5px solid var(--border);border-radius:10px;background:#FBFEFA;color:var(--text-main);">${escapeHtml(kts[j] ? kts[j].text || "" : "")}</textarea>
         <select id="ktScore_${i}_${j}" style="width:90px;">
           <option value="">점수</option>
           ${[1, 2, 3, 4, 5].map(v => `<option value="${v}" ${kts[j] && Number(kts[j].score) === v ? "selected" : ""}>${v}점</option>`).join("")}
@@ -2044,13 +2044,13 @@ function openOkrModal(section, existing, prefillSeason) {
   document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
   document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
 
-  // Objective(여러 줄 textarea)를 뺀 나머지 한 줄짜리 입력칸에서는, 엔터를 누르면 폼이 바로 저장되지 않고
-  // 다음 칸으로 자동으로 넘어가게 합니다. 맨 마지막 칸에서 엔터를 누르면 저장됩니다.
+  // Objective와 KT는 여러 줄 입력칸이라 엔터를 누르면 그냥 줄바꿈이 되게 두고,
+  // 한 줄짜리 칸(시즌/지점/KR 제목/KT 점수)에서만 엔터로 다음 칸으로 넘어가게 합니다.
   const enterOrder = ["okrSeason"];
   if (needsBranch) enterOrder.push("f_branchId");
   [0, 1, 2].forEach(i => {
     enterOrder.push(`krTitle_${i}`);
-    [0, 1, 2].forEach(j => { enterOrder.push(`kt_${i}_${j}`); enterOrder.push(`ktScore_${i}_${j}`); });
+    [0, 1, 2].forEach(j => { enterOrder.push(`ktScore_${i}_${j}`); });
   });
   enterOrder.forEach((id, idx) => {
     const el = document.getElementById(id);
