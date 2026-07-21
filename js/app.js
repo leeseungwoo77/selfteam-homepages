@@ -1560,10 +1560,10 @@ function renderOpsTable(categories, branchesSorted, linksMap) {
   if (!categories.length) { wrap.innerHTML = `<div class="empty-state">${state.profile.role === "leader" ? "위에서 양식을 먼저 추가해주세요." : "아직 등록된 양식이 없습니다."}</div>`; return; }
   const isLeaderView = state.profile.role === "leader";
 
-  let html = `<table style="min-width:700px;"><thead><tr><th style="position:sticky;left:0;background:#F4FAEF;">양식</th>
+  let html = `<table style="min-width:700px;"><thead><tr>
     ${branchesSorted.map(b => `<th>${escapeHtml(b.name)}</th>`).join("")}${isLeaderView ? `<th>관리</th>` : ""}</tr></thead><tbody>`;
   categories.forEach((cat, i) => {
-    html += `<tr><td style="font-weight:700;position:sticky;left:0;background:#fff;white-space:nowrap;">${escapeHtml(cat.label)}</td>`;
+    html += `<tr>`;
     branchesSorted.forEach(b => {
       const cellId = `${b.id}_${cat.id}`;
       const link = linksMap[cellId];
@@ -1571,11 +1571,11 @@ function renderOpsTable(categories, branchesSorted, linksMap) {
       const branchColor = matchLocationColor(b.name) || "var(--blue-deep)";
       if (link && link.url) {
         html += `<td style="white-space:nowrap;">
-          <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="ops-open-btn" style="background:${branchColor};">열기 ↗</a>
+          <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="ops-open-btn" style="background:${branchColor};">${escapeHtml(cat.label)} ↗</a>
           ${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">수정</button>` : ""}
         </td>`;
       } else {
-        html += `<td>${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">+ 링크 추가</button>` : `<span style="color:var(--text-muted);font-size:12px;">-</span>`}</td>`;
+        html += `<td>${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">+ ${escapeHtml(cat.label)} 추가</button>` : `<span style="color:var(--text-muted);font-size:12px;">-</span>`}</td>`;
       }
     });
     if (isLeaderView) {
