@@ -191,6 +191,20 @@ td.actions { white-space: nowrap; text-align: right; }
 .folder-grid-card { padding: 14px; }
 @media (max-width: 1200px) { .folder-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 900px) { .folder-grid { grid-template-columns: repeat(2, 1fr); } }
+
+.meeting-grid-card {
+  background: #fff; border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.meeting-grid-card:hover { transform: translateY(-3px); box-shadow: 0 8px 18px rgba(20,30,15,0.14); border-color: var(--blue-bright); }
+.meeting-grid-empty {
+  border: 1.5px dashed var(--border); border-radius: 10px; padding: 10px 12px;
+  text-align: center; color: var(--text-muted); font-size: 15px;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.meeting-grid-empty.clickable { cursor: pointer; }
+.meeting-grid-empty.clickable:hover { transform: translateY(-3px); box-shadow: 0 6px 14px rgba(20,30,15,0.10); border-color: var(--blue-bright); color: var(--blue-deep); }
 .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
 .stat-card .label { font-size: 12px; color: var(--text-muted); font-weight: 700; }
 .stat-card .value { font-family: var(--font-mono); font-size: 24px; font-weight: 700; margin-top: 6px; color: var(--blue-deep); }
