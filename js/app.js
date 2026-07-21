@@ -1569,13 +1569,14 @@ function renderOpsTable(categories, branchesSorted, linksMap) {
       const link = linksMap[cellId];
       const editable = canEditOpsCell(b.id);
       const branchColor = matchLocationColor(b.name) || "var(--blue-deep)";
+      const branchTextColor = matchLocationTextColor(b.name) || "#fff";
       if (link && link.url) {
         html += `<td style="white-space:nowrap;">
-          <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="ops-open-btn" style="background:${branchColor};">${escapeHtml(cat.label)} ↗</a>
+          <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="ops-open-btn" style="background:${branchColor};color:${branchTextColor};">${escapeHtml(link.title || cat.label)} ↗</a>
           ${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">수정</button>` : ""}
         </td>`;
       } else {
-        html += `<td>${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">+ ${escapeHtml(cat.label)} 추가</button>` : `<span style="color:var(--text-muted);font-size:12px;">-</span>`}</td>`;
+        html += `<td>${editable ? `<button type="button" class="icon-btn" data-edit-cell="${cellId}" data-branch="${b.id}" data-cat="${cat.id}">+ 링크 추가</button>` : `<span style="color:var(--text-muted);font-size:12px;">-</span>`}</td>`;
       }
     });
     if (isLeaderView) {
@@ -1592,7 +1593,11 @@ function renderOpsTable(categories, branchesSorted, linksMap) {
   wrap.innerHTML = html;
 
   wrap.querySelectorAll("[data-edit-cell]").forEach(btn => {
-    btn.onclick = () => openOpsLinkModal(btn.dataset.editCell, btn.dataset.branch, btn.dataset.cat, linksMap[btn.dataset.editCell]?.url || "");
+    btn.onclick = () => {
+      const cat = categories.find(c => c.id === btn.dataset.cat);
+      const link = linksMap[btn.dataset.editCell];
+      openOpsLinkModal(btn.dataset.editCell, btn.dataset.branch, btn.dataset.cat, link?.url || "", link?.title || "", cat?.label || "");
+    };
   });
   wrap.querySelectorAll("[data-move]").forEach(btn => {
     btn.onclick = () => moveCategory(categories, parseInt(btn.dataset.idx, 10), btn.dataset.move);
@@ -1622,12 +1627,14 @@ async function moveCategory(categories, index, direction) {
   renderSection("operation");
 }
 
-function openOpsLinkModal(cellId, branchId, categoryId, currentUrl) {
+function openOpsLinkModal(cellId, branchId, categoryId, currentUrl, currentTitle, categoryLabel) {
   const root = document.getElementById("modalRoot");
   root.innerHTML = `<div class="modal-bg" id="modalBg">
     <div class="modal">
       <h3>링크 설정</h3>
       <form id="opsLinkForm">
+        <div class="field"><label>버튼에 표시할 제목</label><input type="text" id="opsLinkTitle" placeholder="${escapeHtml(categoryLabel || "예: 링크")}" value="${escapeHtml(currentTitle || "")}"></div>
+        <p style="font-size:11px;color:var(--text-muted);margin:-8px 0 14px;">비워두면 양식 이름(${escapeHtml(categoryLabel || "")})으로 표시돼요. 같은 행이어도 지점마다 다른 제목을 쓰셔도 됩니다.</p>
         <div class="field"><label>URL (구글 시트, 문서 등)</label><input type="url" id="opsLinkUrl" placeholder="https://..." value="${escapeHtml(currentUrl)}"></div>
         <div class="grid-2" style="margin-top:10px;">
           <button type="button" class="btn secondary" id="cancelBtn">취소</button>
@@ -1641,9 +1648,10 @@ function openOpsLinkModal(cellId, branchId, categoryId, currentUrl) {
   document.getElementById("opsLinkForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const url = document.getElementById("opsLinkUrl").value.trim();
+    const title = document.getElementById("opsLinkTitle").value.trim();
     if (!url) { root.innerHTML = ""; return; }
     await setDoc(doc(db, "opsLinks", cellId), {
-      branchId, categoryId, url, updatedAt: new Date().toISOString(), updatedBy: state.profile.name
+      branchId, categoryId, url, title, updatedAt: new Date().toISOString(), updatedBy: state.profile.name
     });
     root.innerHTML = "";
     showToast("저장되었습니다.");
