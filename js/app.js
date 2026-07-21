@@ -1231,26 +1231,28 @@ async function renderMeetingGrid(section) {
   const stripHtml = (html) => (html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   const extraKey = (section.headerFields || []).find(k => !["title", "date", "branchName"].includes(k));
 
-  let html = `<table class="table-compact"><thead><tr><th style="min-width:130px;">미팅</th>
-    ${branchesSorted.map(b => `<th style="min-width:150px;">${escapeHtml(b.name)}</th>`).join("")}
+  let html = `<table class="table-compact" style="border-collapse:separate;border-spacing:8px;"><thead><tr><th style="min-width:130px;font-size:15px;font-weight:800;color:var(--text-main);text-transform:none;letter-spacing:normal;">미팅</th>
+    ${branchesSorted.map(b => `<th style="min-width:170px;font-size:15px;font-weight:800;color:var(--text-main);text-transform:none;letter-spacing:normal;">${escapeHtml(b.name)}</th>`).join("")}
   </tr></thead><tbody>`;
 
   rows.forEach((row, ri) => {
-    html += `<tr><td style="font-weight:700;white-space:nowrap;">${escapeHtml(row.title)}</td>`;
+    html += `<tr><td style="font-weight:800;font-size:15px;white-space:nowrap;vertical-align:top;">${escapeHtml(row.title)}</td>`;
     branchesSorted.forEach(b => {
       const cell = row.cells[b.id];
       if (cell) {
         const preview = stripHtml(cell.content);
         const imgField = section.fields.find(f => f.type === "imageUpload");
         const hasAttachments = imgField && (cell[imgField.key] || []).length > 0;
-        html += `<td style="cursor:pointer;" data-cell-row="${ri}" data-cell-branch="${b.id}">
-          <div style="font-size:12px;color:var(--text-main);">${escapeHtml(preview.slice(0, 40))}${preview.length > 40 ? "…" : (preview ? "" : "(내용 없음)")}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(cell.date || "")}${extraKey && cell[extraKey] ? " · " + escapeHtml(cell[extraKey]) : ""}${hasAttachments ? " · 📎" : ""}</div>
+        html += `<td style="padding:0;">
+          <div class="meeting-grid-card" data-cell-row="${ri}" data-cell-branch="${b.id}">
+            <div style="font-size:14px;color:var(--text-main);line-height:1.5;">${escapeHtml(preview.slice(0, 40))}${preview.length > 40 ? "…" : (preview ? "" : "(내용 없음)")}</div>
+            <div style="font-size:12.5px;color:var(--text-muted);margin-top:4px;">${escapeHtml(cell.date || "")}${extraKey && cell[extraKey] ? " · " + escapeHtml(cell[extraKey]) : ""}${hasAttachments ? " · 📎" : ""}</div>
+          </div>
         </td>`;
       } else if (canCreateForBranch(section, b.id)) {
-        html += `<td style="cursor:pointer;text-align:center;color:var(--text-muted);" data-cell-new-row="${ri}" data-cell-new-branch="${b.id}">+</td>`;
+        html += `<td style="padding:0;"><div class="meeting-grid-empty clickable" data-cell-new-row="${ri}" data-cell-new-branch="${b.id}">+</div></td>`;
       } else {
-        html += `<td style="text-align:center;color:var(--text-muted);">-</td>`;
+        html += `<td style="padding:0;"><div class="meeting-grid-empty">-</div></td>`;
       }
     });
     html += `</tr>`;
@@ -1258,16 +1260,16 @@ async function renderMeetingGrid(section) {
   html += `</tbody></table>`;
   wrap.innerHTML = html;
 
-  wrap.querySelectorAll("[data-cell-row]").forEach(td => {
-    td.onclick = () => {
-      const row = rows[parseInt(td.dataset.cellRow, 10)];
-      openMeetingDetailModal(section, row.cells[td.dataset.cellBranch]);
+  wrap.querySelectorAll("[data-cell-row]").forEach(el => {
+    el.onclick = () => {
+      const row = rows[parseInt(el.dataset.cellRow, 10)];
+      openMeetingDetailModal(section, row.cells[el.dataset.cellBranch]);
     };
   });
-  wrap.querySelectorAll("[data-cell-new-row]").forEach(td => {
-    td.onclick = () => {
-      const row = rows[parseInt(td.dataset.cellNewRow, 10)];
-      openModal(section, null, { title: row.title, branchId: td.dataset.cellNewBranch });
+  wrap.querySelectorAll("[data-cell-new-row]").forEach(el => {
+    el.onclick = () => {
+      const row = rows[parseInt(el.dataset.cellNewRow, 10)];
+      openModal(section, null, { title: row.title, branchId: el.dataset.cellNewBranch });
     };
   });
 }
