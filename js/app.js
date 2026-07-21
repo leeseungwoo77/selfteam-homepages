@@ -1944,38 +1944,38 @@ function renderOkrGridBody(section, docs, year) {
     return { label, sd, doc: matches[0] || null };
   });
 
-  let html = `<table style="min-width:900px;width:100%;border-collapse:collapse;table-layout:fixed;">
-    <colgroup><col style="width:90px;">${columns.map(() => `<col>`).join("")}</colgroup>
+  let html = `<table style="min-width:1200px;width:100%;border-collapse:collapse;table-layout:fixed;">
+    <colgroup><col style="width:100px;">${columns.map(() => `<col>`).join("")}</colgroup>
     <thead><tr>
     <th style="border-right:2px solid var(--border);padding-left:6px;padding-right:6px;">구분</th>
     ${columns.map((c, idx) => `<th style="${colStyle(idx)}word-break:break-word;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
-        <span style="font-size:15px;font-weight:800;color:var(--text-main);text-transform:none;letter-spacing:normal;">${c.sd.label}</span>
+        <span style="font-size:20px;font-weight:800;color:var(--text-main);text-transform:none;letter-spacing:normal;">${c.sd.label}</span>
         ${c.doc
           ? (canEditDoc(section, c.doc) ? `<span style="white-space:nowrap;"><button class="icon-btn" data-edit-okr="${c.doc.id}">수정</button><button class="icon-btn danger" data-del-okr="${c.doc.id}">삭제</button></span>` : "")
           : (canWriteSection(section) ? `<button class="icon-btn" data-new-okr="${escapeHtml(c.label)}">+ 등록</button>` : "")}
       </div>
     </th>`).join("")}
   </tr></thead><tbody>
-    <tr><td style="font-weight:700;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;">Objective</td>
-      ${columns.map((c, idx) => `<td style="${colStyle(idx)}word-break:break-word;">${c.doc && c.doc.objective ? escapeMultiline(c.doc.objective) : `<span style="color:var(--text-muted);">-</span>`}</td>`).join("")}
+    <tr><td style="font-weight:700;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;font-size:16px;">Objective</td>
+      ${columns.map((c, idx) => `<td style="${colStyle(idx)}word-break:break-word;font-size:16px;line-height:1.5;">${c.doc && c.doc.objective ? escapeMultiline(c.doc.objective) : `<span style="color:var(--text-muted);">-</span>`}</td>`).join("")}
     </tr>
-    ${[0, 1, 2].map(i => `<tr><td style="font-weight:700;vertical-align:top;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;">KR${i + 1}</td>
+    ${[0, 1, 2].map(i => `<tr><td style="font-weight:700;vertical-align:top;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;font-size:16px;">KR${i + 1}</td>
       ${columns.map((c, idx) => {
         const kr = c.doc && (c.doc.krs || [])[i];
         if (!kr || !kr.title) return `<td style="${colStyle(idx)}word-break:break-word;"><span style="color:var(--text-muted);">-</span></td>`;
         const ach = krAchievement(kr);
         const kts = normalizeKts(kr.kts).filter(kt => (kt.text || "").trim());
         return `<td style="${colStyle(idx)}word-break:break-word;">
-          <div style="font-size:13px;font-weight:700;margin-bottom:4px;">${escapeHtml(kr.title)}</div>
+          <div style="font-size:17px;font-weight:700;margin-bottom:6px;line-height:1.4;">${escapeHtml(kr.title)}</div>
           <div style="background:#FFFFFFAA;border-radius:6px;height:8px;margin:6px 0;overflow:hidden;"><div style="background:var(--green-bright);height:100%;width:${ach}%;"></div></div>
-          <div class="mono" style="font-size:12px;color:var(--green-deep);font-weight:700;">${ach}%</div>
-          ${kts.length ? `<ul style="margin:6px 0 0 16px;font-size:12px;line-height:1.6;">${kts.map(kt => `<li>${escapeHtml(kt.text)} <span class="mono" style="color:var(--text-muted);">(${kt.score || 0}점)</span></li>`).join("")}</ul>` : ""}
+          <div class="mono" style="font-size:16px;color:var(--green-deep);font-weight:700;">${ach}%</div>
+          ${kts.length ? `<ul style="margin:6px 0 0 18px;font-size:15px;line-height:1.6;">${kts.map(kt => `<li>${escapeHtml(kt.text)} <span class="mono" style="color:var(--text-muted);">(${kt.score || 0}점)</span></li>`).join("")}</ul>` : ""}
         </td>`;
       }).join("")}
     </tr>`).join("")}
-    <tr><td style="font-weight:700;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;">종합 달성율</td>
-      ${columns.map((c, idx) => `<td class="mono" style="font-weight:800;color:var(--blue-deep);${colStyle(idx)}">${c.doc ? overallAchievement(c.doc.krs || []) + "%" : "-"}</td>`).join("")}
+    <tr><td style="font-weight:700;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;font-size:16px;">종합 달성율</td>
+      ${columns.map((c, idx) => `<td class="mono" style="font-weight:800;color:var(--blue-deep);font-size:17px;${colStyle(idx)}">${c.doc ? overallAchievement(c.doc.krs || []) + "%" : "-"}</td>`).join("")}
     </tr>
   </tbody></table>`;
   wrap.innerHTML = html;
@@ -2043,6 +2043,26 @@ function openOkrModal(section, existing, prefillSeason) {
 
   document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
   document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+
+  // Objective(여러 줄 textarea)를 뺀 나머지 한 줄짜리 입력칸에서는, 엔터를 누르면 폼이 바로 저장되지 않고
+  // 다음 칸으로 자동으로 넘어가게 합니다. 맨 마지막 칸에서 엔터를 누르면 저장됩니다.
+  const enterOrder = ["okrSeason"];
+  if (needsBranch) enterOrder.push("f_branchId");
+  [0, 1, 2].forEach(i => {
+    enterOrder.push(`krTitle_${i}`);
+    [0, 1, 2].forEach(j => { enterOrder.push(`kt_${i}_${j}`); enterOrder.push(`ktScore_${i}_${j}`); });
+  });
+  enterOrder.forEach((id, idx) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const nextEl = document.getElementById(enterOrder[idx + 1]);
+      if (nextEl) { nextEl.focus(); if (nextEl.select) nextEl.select(); }
+      else { document.getElementById("saveBtn").click(); }
+    });
+  });
 
   // KT 텍스트/점수를 바꿀 때마다 예상 달성율을 바로 다시 계산해서 보여줍니다.
   [0, 1, 2].forEach(i => {
