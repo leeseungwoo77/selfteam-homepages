@@ -2207,11 +2207,82 @@ function openOkrModal(section, existing, prefillSeason) {
 }
 
 /* ===================== 등록/수정 모달 ===================== */
+function richtextToolbarHtml(key) {
+  const colors = ["#22301A", "#E03C3C", "#2979FF", "#00C853", "#F5A623", "#8E1E5C"];
+  return `<div class="rt-toolbar" data-for="${key}">
+    <button type="button" class="rt-btn" data-cmd="bold" title="굵게"><b>B</b></button>
+    <span class="rt-sep"></span>
+    <button type="button" class="rt-btn rt-size" data-size="rt-small" title="작게">S</button>
+    <button type="button" class="rt-btn rt-size" data-size="" title="보통">M</button>
+    <button type="button" class="rt-btn rt-size" data-size="rt-large" title="크게">L</button>
+    <span class="rt-sep"></span>
+    ${colors.map(c => `<button type="button" class="rt-btn rt-color" data-color="${c}" style="background:${c};" title="글자색"></button>`).join("")}
+    <span class="rt-sep"></span>
+    <button type="button" class="rt-btn" data-cmd="removeFormat" title="서식 지우기" style="width:auto;padding:0 8px;font-size:11px;">지우기</button>
+  </div>`;
+}
+function wrapSelectionWithClass(editEl, className) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  if (!editEl.contains(range.commonAncestorContainer)) return;
+  const span = document.createElement("span");
+  if (className) span.className = className;
+  try {
+    range.surroundContents(span);
+  } catch (err) {
+    try {
+      const frag = range.extractContents();
+      span.appendChild(frag);
+      range.insertNode(span);
+    } catch (err2) { /* 선택 영역이 복잡하면 그냥 포기합니다 */ }
+  }
+}
+// 폼이 그려진 뒤, richtext 필드마다 도구모음 버튼에 실제 동작을 연결합니다.
+function wireRichtextToolbars(formFields) {
+  formFields.filter(f => f.type === "richtext").forEach(f => {
+    const editEl = document.getElementById(`f_${f.key}`);
+    const toolbar = document.querySelector(`.rt-toolbar[data-for="${f.key}"]`);
+    if (!editEl || !toolbar) return;
+    let savedRange = null;
+    const saveSelection = () => {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && editEl.contains(sel.anchorNode)) {
+        savedRange = sel.getRangeAt(0).cloneRange();
+      }
+    };
+    editEl.addEventListener("keyup", saveSelection);
+    editEl.addEventListener("mouseup", saveSelection);
+    toolbar.querySelectorAll(".rt-btn").forEach(btn => {
+      // mousedown에서 기본 동작을 막아야 버튼을 눌러도 에디터의 선택 영역이 풀리지 않습니다.
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => {
+        editEl.focus();
+        if (savedRange) {
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(savedRange);
+        }
+        if (btn.dataset.cmd === "bold") {
+          document.execCommand("bold");
+        } else if (btn.dataset.cmd === "removeFormat") {
+          document.execCommand("removeFormat");
+        } else if (btn.dataset.color) {
+          document.execCommand("foreColor", false, btn.dataset.color);
+        } else if (btn.classList.contains("rt-size")) {
+          wrapSelectionWithClass(editEl, btn.dataset.size);
+        }
+        saveSelection();
+      });
+    });
+  });
+}
 const RICHTEXT_ALLOWED_TAGS = new Set([
   "P","BR","STRONG","B","EM","I","U","UL","OL","LI","TABLE","THEAD","TBODY","TR","TD","TH",
   "SPAN","DIV","A","H1","H2","H3","H4","BLOCKQUOTE","CODE","PRE","HR"
 ]);
-const RICHTEXT_ALLOWED_ATTRS = new Set(["style","href","target","colspan","rowspan"]);
+const RICHTEXT_ALLOWED_ATTRS = new Set(["style","href","target","colspan","rowspan","class"]);
+const RICHTEXT_ALLOWED_CLASSES = new Set(["rt-small","rt-large"]);
 
 function sanitizeRichHtml(html) {
   const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
@@ -2228,6 +2299,11 @@ function sanitizeRichHtml(html) {
           if (!RICHTEXT_ALLOWED_ATTRS.has(name)) { child.removeAttribute(attr.name); return; }
           if (name === "href" && !/^https?:/i.test(attr.value)) child.removeAttribute(attr.name);
           if (name === "style" && /expression|javascript:/i.test(attr.value)) child.removeAttribute(attr.name);
+          if (name === "class") {
+            // 굵기/색/글자크기 도구모음에서 쓰는 클래스만 허용하고, 그 외 붙여넣기로 딸려온 class는 다 지웁니다.
+            const kept = attr.value.split(/\s+/).filter(c => RICHTEXT_ALLOWED_CLASSES.has(c));
+            if (kept.length) child.setAttribute("class", kept.join(" ")); else child.removeAttribute("class");
+          }
         });
         if (child.tagName === "A") child.setAttribute("target", "_blank");
         clean(child);
@@ -2291,8 +2367,9 @@ function openModal(section, existing, prefill) {
       const initial = sanitizeRichHtml(existing ? existing[f.key] : "");
       return `<div class="field">
         <label>${f.label}</label>
-        <div class="richtext-edit" id="f_${f.key}" contenteditable="true">${initial}</div>
-        <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">Tiro 등에서 복사한 내용을 표까지 그대로 붙여넣기(Ctrl+V) 하실 수 있어요.</p>
+        ${richtextToolbarHtml(f.key)}
+        <div class="richtext-edit has-toolbar" id="f_${f.key}" contenteditable="true">${initial}</div>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">위 도구모음으로 글자 굵기·색·크기를 바꿀 수 있고, Tiro 등에서 복사한 내용을 표까지 그대로 붙여넣기(Ctrl+V) 하실 수 있어요.</p>
       </div>`;
     }
     const currentVal = existing ? existing[f.key] : (prefill && prefill[f.key] !== undefined ? prefill[f.key] : "");
@@ -2344,6 +2421,8 @@ function openModal(section, existing, prefill) {
       e.target.value = "";
     });
   });
+
+  wireRichtextToolbars(formFields);
 
   document.getElementById("entryForm").addEventListener("submit", async (e) => {
     e.preventDefault();
