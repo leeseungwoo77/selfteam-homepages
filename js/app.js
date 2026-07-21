@@ -531,9 +531,7 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   if (!snap.exists()) {
-    alert("계정 정보(프로필)를 찾을 수 없습니다. 다시 회원가입해주세요.");
-    await signOut(auth);
-    window.location.href = "index.html";
+    await renderProfileRepairScreen(user);
     return;
   }
   state.profile = snap.data();
@@ -549,14 +547,82 @@ onAuthStateChanged(auth, async (user) => {
   renderSection(state.currentSection);
 });
 
+// 회원가입 중 네트워크 문제 등으로 로그인 계정만 만들어지고 Firestore 프로필 저장이 실패했던 경우를 위한 화면입니다.
+// 다시 로그인하면 이 화면이 뜨고, 이름/지점을 입력하면 바로 정상적으로 이용할 수 있습니다.
+async function renderProfileRepairScreen(user) {
+  let branches = [];
+  try {
+    const snap = await getDocs(collection(db, "branches"));
+    branches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) { /* 무시하고 빈 목록으로 진행 */ }
+
+  document.body.innerHTML = `<div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo"><span style="font-weight:800;font-size:15px;">셀프팀 홈페이지</span></div>
+      <p class="auth-sub">로그인 계정은 있는데 프로필 정보가 비어있어요. (가입 중 일시적인 오류였을 수 있어요.) 이름과 담당 지점을 입력하면 바로 이용하실 수 있어요.</p>
+      <form id="profileRepairForm">
+        <div class="field"><label>이름</label><input type="text" id="repairName" required></div>
+        <div class="field"><label>담당 지점</label>
+          <select id="repairBranch" required>
+            <option value="">${branches.length ? "선택하세요" : "등록된 지점이 없습니다 (팀장 문의)"}</option>
+            ${branches.map(b => `<option value="${b.id}" data-name="${escapeHtml(b.name)}">${escapeHtml(b.name)}</option>`).join("")}
+          </select>
+        </div>
+        <button class="btn" type="submit">저장하고 계속하기</button>
+        <p class="error-msg" id="repairError"></p>
+      </form>
+      <p class="hint">${escapeHtml(user.email)} 계정으로 로그인되어 있어요. 문제가 계속되면 팀장에게 문의하세요.</p>
+    </div>
+  </div>`;
+
+  document.getElementById("profileRepairForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("repairName").value.trim();
+    const branchSelect = document.getElementById("repairBranch");
+    const branchId = branchSelect.value;
+    const branchName = branchSelect.selectedOptions[0]?.dataset.name || "";
+    const errEl = document.getElementById("repairError");
+    errEl.textContent = "";
+    if (!branchId) { errEl.textContent = "담당 지점을 선택해주세요."; return; }
+    try {
+      await setDoc(doc(db, "users", user.uid), {
+        name, email: user.email, branchId, branchName, role: "member",
+        createdAt: new Date().toISOString()
+      });
+      window.location.reload();
+    } catch (err) {
+      errEl.textContent = "저장 중 오류가 발생했습니다: " + err.message;
+    }
+  });
+}
+
 document.getElementById("logoutBtn").onclick = () => signOut(auth);
 document.getElementById("navToggleBtn").onclick = () => {
   document.querySelector(".sidebar").classList.toggle("nav-open");
 };
 
+async function moveBranch(bid, direction) {
+  const index = state.branches.findIndex(b => b.id === bid);
+  const swapWith = direction === "up" ? index - 1 : index + 1;
+  if (swapWith < 0 || swapWith >= state.branches.length) return;
+  const reordered = [...state.branches];
+  [reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]];
+  await Promise.all(reordered.map((b, i) => updateDoc(doc(db, "branches", b.id), { order: i })));
+  await loadBranches();
+  buildNav();
+  markActiveNav("admin");
+  renderAdmin();
+}
+
 async function loadBranches() {
   const snap = await getDocs(collection(db, "branches"));
   state.branches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  state.branches.sort((a, b) => {
+    const oa = a.order !== undefined ? a.order : Infinity;
+    const ob = b.order !== undefined ? b.order : Infinity;
+    if (oa !== ob) return oa - ob;
+    return (a.name || "").localeCompare(b.name || "", "ko");
+  });
 }
 
 async function loadCustomFolders() {
@@ -1144,7 +1210,7 @@ async function renderMeetingGrid(section) {
   const branches = canViewAllRole()
     ? (filterBranchId ? state.branches.filter(b => b.id === filterBranchId) : state.branches)
     : state.branches.filter(b => b.id === state.profile.branchId);
-  const branchesSorted = [...branches].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const branchesSorted = branches; // state.branches가 이미 팀장이 지정한 순서대로 정렬돼 있습니다.
 
   const wrap = document.getElementById("meetingGridWrap");
   if (!branchesSorted.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다.</div>`; return; }
@@ -1469,7 +1535,7 @@ async function renderOpsGrid(section) {
 
   const [categories, branchesSorted] = await Promise.all([
     loadOpsCategories(),
-    Promise.resolve([...state.branches].sort((a, b) => a.name.localeCompare(b.name, "ko")))
+    Promise.resolve([...state.branches]) // state.branches가 이미 팀장이 지정한 순서대로 정렬돼 있습니다.
   ]);
   const linksMap = await loadOpsLinks();
 
@@ -1662,7 +1728,7 @@ async function renderRosterGrid(section) {
     <div id="rosterWrap">불러오는 중...</div>`;
   renderRosterLegend();
 
-  const branchesSorted = [...state.branches].sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  const branchesSorted = [...state.branches]; // state.branches가 이미 팀장이 지정한 순서대로 정렬돼 있습니다.
   const wrap = document.getElementById("rosterWrap");
   if (!branchesSorted.length) { wrap.innerHTML = `<div class="card"><div class="empty-state">등록된 지점이 없습니다.</div></div>`; return; }
 
@@ -2598,7 +2664,7 @@ async function renderAdmin() {
     e.preventDefault();
     const name = document.getElementById("newBranchName").value.trim();
     if (!name) return;
-    await addDoc(collection(db, "branches"), { name, createdAt: new Date().toISOString() });
+    await addDoc(collection(db, "branches"), { name, order: Date.now(), createdAt: new Date().toISOString() });
     await loadBranches();
     showToast("지점이 추가되었습니다.");
     buildNav();
@@ -2610,11 +2676,20 @@ async function renderAdmin() {
   if (!state.branches.length) {
     branchWrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다.</div>`;
   } else {
-    branchWrap.innerHTML = `<table><thead><tr><th>지점명</th><th></th></tr></thead><tbody>
-      ${state.branches.map(b => `<tr><td>${escapeHtml(b.name)}</td>
-        <td class="actions"><button class="icon-btn danger" data-bid="${b.id}">삭제</button></td></tr>`).join("")}
+    branchWrap.innerHTML = `<table><thead><tr><th></th><th>지점명</th><th></th></tr></thead><tbody>
+      ${state.branches.map((b, i) => `<tr>
+        <td style="white-space:nowrap;">
+          <button class="icon-btn" data-move="up" data-bid="${b.id}" ${i === 0 ? "disabled style='opacity:.3;'" : ""}>▲</button>
+          <button class="icon-btn" data-move="down" data-bid="${b.id}" ${i === state.branches.length - 1 ? "disabled style='opacity:.3;'" : ""}>▼</button>
+        </td>
+        <td>${escapeHtml(b.name)}</td>
+        <td class="actions"><button class="icon-btn danger" data-bid="${b.id}">삭제</button></td>
+      </tr>`).join("")}
     </tbody></table>`;
-    branchWrap.querySelectorAll("[data-bid]").forEach(btn => {
+    branchWrap.querySelectorAll("[data-move]").forEach(btn => {
+      btn.onclick = () => moveBranch(btn.dataset.bid, btn.dataset.move);
+    });
+    branchWrap.querySelectorAll("button.icon-btn.danger[data-bid]").forEach(btn => {
       btn.onclick = async () => {
         if (!confirm("지점을 삭제하면 소속 데이터는 남아있지만 지점명 표시가 어긋날 수 있습니다. 삭제할까요?")) return;
         await deleteDoc(doc(db, "branches", btn.dataset.bid));
