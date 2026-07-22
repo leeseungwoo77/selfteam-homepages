@@ -112,6 +112,9 @@ a { color: inherit; }
 .rt-btn:hover { border-color: var(--blue-bright); }
 .rt-color { border-color: rgba(0,0,0,0.15); }
 .rt-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
+/* 도구모음에서 지정한 글자 크기는 .rich-content로 감싸지 않은 화면(예: OKR 그리드)에서도 적용됩니다. */
+.rt-small { font-size: 11px; }
+.rt-large { font-size: 17px; }
 
 .rich-content { font-size: 13.5px; line-height: 1.6; overflow-x: auto; }
 /* 붙여넣기 한 글 안에 있던 인라인 font-size나 h1/h2 등 큰 제목 태그를 강제로 작게 눌러줍니다. */
