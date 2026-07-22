@@ -357,7 +357,12 @@ async function renderMonthlySchedule(section) {
         document.getElementById("activeCellHint").textContent = `${input.dataset.date} 칸 선택됨`;
       });
       input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); input.blur(); return; }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const below = findAdjacentCell(input, "down");
+          if (below) { below.focus(); below.select(); } else { input.blur(); }
+          return;
+        }
         const arrowMap = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
         if (arrowMap[e.key]) {
           const target = findAdjacentCell(input, arrowMap[e.key]);
