@@ -2251,6 +2251,32 @@ function wrapSelectionWithClass(editEl, className) {
     } catch (err2) { /* 선택 영역이 복잡하면 그냥 포기합니다 */ }
   }
 }
+function wrapSelectionWithStyle(editEl, styleText) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  if (!editEl.contains(range.commonAncestorContainer)) return;
+  const span = document.createElement("span");
+  span.setAttribute("style", styleText);
+  try {
+    range.surroundContents(span);
+  } catch (err) {
+    try {
+      const frag = range.extractContents();
+      span.appendChild(frag);
+      range.insertNode(span);
+    } catch (err2) { /* 선택 영역이 복잡하면 그냥 포기합니다 */ }
+  }
+}
+function clearSelectionFormatting(editEl) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  if (!editEl.contains(range.commonAncestorContainer)) return;
+  const text = range.toString();
+  range.deleteContents();
+  range.insertNode(document.createTextNode(text));
+}
 // 폼이 그려진 뒤, richtext 필드마다 도구모음 버튼에 실제 동작을 연결합니다.
 function wireRichtextToolbarFor(editEl, toolbar) {
   if (!editEl || !toolbar) return;
@@ -2273,12 +2299,14 @@ function wireRichtextToolbarFor(editEl, toolbar) {
         sel.removeAllRanges();
         sel.addRange(savedRange);
       }
+      // 브라우저마다 다르게 동작하고(예: <font> 태그) 저장 시 사라져버리는 execCommand 대신,
+      // 항상 style 속성이 붙은 <span>으로 직접 감싸서 어디서나 똑같이 저장·표시되게 합니다.
       if (btn.dataset.cmd === "bold") {
-        document.execCommand("bold");
+        wrapSelectionWithStyle(editEl, "font-weight:700");
       } else if (btn.dataset.cmd === "removeFormat") {
-        document.execCommand("removeFormat");
+        clearSelectionFormatting(editEl);
       } else if (btn.dataset.color) {
-        document.execCommand("foreColor", false, btn.dataset.color);
+        wrapSelectionWithStyle(editEl, `color:${btn.dataset.color}`);
       } else if (btn.classList.contains("rt-size")) {
         wrapSelectionWithClass(editEl, btn.dataset.size);
       }
