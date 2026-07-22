@@ -1966,7 +1966,7 @@ function normalizeKts(kts) {
 }
 // KR 달성율 = 그 KR에 속한 KT들의 점수(1~5) 평균을 100점 만점으로 환산한 값
 function krAchievement(kr) {
-  const kts = normalizeKts(kr && kr.kts).filter(kt => (kt.text || "").trim() && kt.score);
+  const kts = normalizeKts(kr && kr.kts).filter(kt => !richTextIsEmpty(kt.text) && kt.score);
   if (!kts.length) return 0;
   const avg = kts.reduce((s, kt) => s + Number(kt.score || 0), 0) / kts.length;
   return Math.round((avg / 5) * 100);
@@ -2009,7 +2009,6 @@ async function renderOkrFolder(section) {
 
 function renderOkrGridBody(section, docs, year) {
   const wrap = document.getElementById("okrGridWrap");
-  const escapeMultiline = (s) => escapeHtml(s || "").replace(/\n/g, "<br>");
   // 봄(연분홍) · 여름(하늘빛) · 가을(살구빛) · 겨울(차가운 회청빛) 느낌으로 시즌 배경색을 구분합니다.
   const SEASON_BG = ["#FCEEF3", "#E5F6FA", "#FBF0DE", "#EAEEF4"];
   const colStyle = (idx) => `background:${SEASON_BG[idx % SEASON_BG.length]};border-left:2px solid var(--border);`;
@@ -2034,19 +2033,19 @@ function renderOkrGridBody(section, docs, year) {
     </th>`).join("")}
   </tr></thead><tbody>
     <tr><td style="font-weight:700;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;font-size:16px;">Objective</td>
-      ${columns.map((c, idx) => `<td style="${colStyle(idx)}word-break:break-word;font-size:16px;line-height:1.5;">${c.doc && c.doc.objective ? escapeMultiline(c.doc.objective) : `<span style="color:var(--text-muted);">-</span>`}</td>`).join("")}
+      ${columns.map((c, idx) => `<td style="${colStyle(idx)}word-break:break-word;font-size:16px;line-height:1.5;">${c.doc && !richTextIsEmpty(c.doc.objective) ? c.doc.objective : `<span style="color:var(--text-muted);">-</span>`}</td>`).join("")}
     </tr>
     ${[0, 1, 2].map(i => `<tr><td style="font-weight:700;vertical-align:top;border-right:2px solid var(--border);padding:10px 6px;word-break:keep-all;font-size:16px;">KR${i + 1}</td>
       ${columns.map((c, idx) => {
         const kr = c.doc && (c.doc.krs || [])[i];
         if (!kr || !kr.title) return `<td style="${colStyle(idx)}word-break:break-word;"><span style="color:var(--text-muted);">-</span></td>`;
         const ach = krAchievement(kr);
-        const kts = normalizeKts(kr.kts).filter(kt => (kt.text || "").trim());
+        const kts = normalizeKts(kr.kts).filter(kt => !richTextIsEmpty(kt.text));
         return `<td style="${colStyle(idx)}word-break:break-word;">
           <div style="font-size:17px;font-weight:700;margin-bottom:6px;line-height:1.4;">${escapeHtml(kr.title)}</div>
           <div style="background:#FFFFFFAA;border-radius:6px;height:8px;margin:6px 0;overflow:hidden;"><div style="background:var(--green-bright);height:100%;width:${ach}%;"></div></div>
           <div class="mono" style="font-size:16px;color:var(--green-deep);font-weight:700;">${ach}%</div>
-          ${kts.length ? `<ul style="margin:6px 0 0 18px;font-size:15px;line-height:1.6;">${kts.map(kt => `<li>${escapeHtml(kt.text).replace(/\n/g, "<br>")} <span class="mono" style="color:var(--text-muted);">(${kt.score || 0}점)</span></li>`).join("")}</ul>` : ""}
+          ${kts.length ? `<ul style="margin:6px 0 0 18px;font-size:15px;line-height:1.6;">${kts.map(kt => `<li>${kt.text} <span class="mono" style="color:var(--text-muted);">(${kt.score || 0}점)</span></li>`).join("")}</ul>` : ""}
         </td>`;
       }).join("")}
     </tr>`).join("")}
@@ -2079,9 +2078,12 @@ function krBlockHtml(i, kr) {
     <h2 style="font-size:14px;margin:0 0 12px;">Key Result ${i + 1}</h2>
     <div class="field"><label>KR${i + 1} 내용 (정량적 목표)</label><input type="text" id="krTitle_${i}" value="${escapeHtml(k.title || "")}"></div>
     <div class="field"><label>Key Task (최대 3개)</label>
-      <p style="font-size:11px;color:var(--text-muted);margin:0 0 8px;">KT마다 1~5점으로 점수를 매기면, 평균을 100점 만점으로 환산해서 이 KR의 달성율이 자동 계산돼요.</p>
-      ${[0, 1, 2].map(j => `<div style="display:flex;gap:8px;margin-bottom:6px;">
-        <textarea id="kt_${i}_${j}" placeholder="KT ${j + 1}" rows="2" style="flex:1;resize:vertical;font-family:var(--font-display);font-size:14px;padding:11px 12px;border:1.5px solid var(--border);border-radius:10px;background:#FBFEFA;color:var(--text-main);">${escapeHtml(kts[j] ? kts[j].text || "" : "")}</textarea>
+      <p style="font-size:11px;color:var(--text-muted);margin:0 0 8px;">KT마다 1~5점으로 점수를 매기면, 평균을 100점 만점으로 환산해서 이 KR의 달성율이 자동 계산돼요. 도구모음으로 글자 굵기·색·크기도 바꿀 수 있어요.</p>
+      ${[0, 1, 2].map(j => `<div style="display:flex;gap:8px;margin-bottom:12px;align-items:flex-start;">
+        <div style="flex:1;">
+          ${richtextToolbarHtml(`kt_${i}_${j}`)}
+          <div class="richtext-edit has-toolbar kt-edit" id="kt_${i}_${j}" contenteditable="true">${sanitizeRichHtml(kts[j] ? kts[j].text || "" : "")}</div>
+        </div>
         <select id="ktScore_${i}_${j}" style="width:90px;">
           <option value="">점수</option>
           ${[1, 2, 3, 4, 5].map(v => `<option value="${v}" ${kts[j] && Number(kts[j].score) === v ? "selected" : ""}>${v}점</option>`).join("")}
@@ -2108,7 +2110,10 @@ function openOkrModal(section, existing, prefillSeason) {
           <select id="okrSeason">${seasonOpts.map(s => `<option value="${s}" ${selectedSeason === s ? "selected" : ""}>${s}</option>`).join("")}</select>
         </div>
         ${needsBranch ? `<div class="field"><label>지점</label>${fieldInput({ key: "branchId", type: "branchSelect" }, existing ? existing.branchId : "")}</div>` : ""}
-        <div class="field"><label>Objective (목적 · 정성적 서술)</label><textarea id="okrObjective" rows="2">${escapeHtml((existing && existing.objective) || "")}</textarea></div>
+        <div class="field"><label>Objective (목적 · 정성적 서술)</label>
+          ${richtextToolbarHtml("okrObjective")}
+          <div class="richtext-edit has-toolbar" id="okrObjective" contenteditable="true" style="min-height:70px;">${sanitizeRichHtml((existing && existing.objective) || "")}</div>
+        </div>
         ${[0, 1, 2].map(i => krBlockHtml(i, krs[i])).join("")}
         <div class="grid-2" style="margin-top:10px;">
           <button type="button" class="btn secondary" id="cancelBtn">취소</button>
@@ -2145,7 +2150,7 @@ function openOkrModal(section, existing, prefillSeason) {
     const updatePreview = () => {
       const kr = {
         kts: [0, 1, 2].map(j => ({
-          text: document.getElementById(`kt_${i}_${j}`).value,
+          text: document.getElementById(`kt_${i}_${j}`).innerHTML,
           score: document.getElementById(`ktScore_${i}_${j}`).value
         }))
       };
@@ -2158,6 +2163,14 @@ function openOkrModal(section, existing, prefillSeason) {
     });
   });
 
+  // Objective와 KT 입력칸의 글자 굵기·색·크기 도구모음을 연결합니다.
+  wireRichtextToolbarFor(document.getElementById("okrObjective"), document.querySelector('.rt-toolbar[data-for="okrObjective"]'));
+  [0, 1, 2].forEach(i => {
+    [0, 1, 2].forEach(j => {
+      wireRichtextToolbarFor(document.getElementById(`kt_${i}_${j}`), document.querySelector(`.rt-toolbar[data-for="kt_${i}_${j}"]`));
+    });
+  });
+
   document.getElementById("okrForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const saveBtn = document.getElementById("saveBtn");
@@ -2165,11 +2178,11 @@ function openOkrModal(section, existing, prefillSeason) {
     saveBtn.textContent = "저장 중...";
     try {
       const season = document.getElementById("okrSeason").value;
-      const objective = document.getElementById("okrObjective").value.trim();
+      const objective = sanitizeRichHtml(document.getElementById("okrObjective").innerHTML);
       const krsData = [0, 1, 2].map(i => ({
         title: document.getElementById(`krTitle_${i}`).value.trim(),
         kts: [0, 1, 2].map(j => ({
-          text: document.getElementById(`kt_${i}_${j}`).value.trim(),
+          text: sanitizeRichHtml(document.getElementById(`kt_${i}_${j}`).innerHTML),
           score: parseInt(document.getElementById(`ktScore_${i}_${j}`).value, 10) || 0
         }))
       }));
@@ -2239,43 +2252,47 @@ function wrapSelectionWithClass(editEl, className) {
   }
 }
 // 폼이 그려진 뒤, richtext 필드마다 도구모음 버튼에 실제 동작을 연결합니다.
-function wireRichtextToolbars(formFields) {
-  formFields.filter(f => f.type === "richtext").forEach(f => {
-    const editEl = document.getElementById(`f_${f.key}`);
-    const toolbar = document.querySelector(`.rt-toolbar[data-for="${f.key}"]`);
-    if (!editEl || !toolbar) return;
-    let savedRange = null;
-    const saveSelection = () => {
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0 && editEl.contains(sel.anchorNode)) {
-        savedRange = sel.getRangeAt(0).cloneRange();
+function wireRichtextToolbarFor(editEl, toolbar) {
+  if (!editEl || !toolbar) return;
+  let savedRange = null;
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editEl.contains(sel.anchorNode)) {
+      savedRange = sel.getRangeAt(0).cloneRange();
+    }
+  };
+  editEl.addEventListener("keyup", saveSelection);
+  editEl.addEventListener("mouseup", saveSelection);
+  toolbar.querySelectorAll(".rt-btn").forEach(btn => {
+    // mousedown에서 기본 동작을 막아야 버튼을 눌러도 에디터의 선택 영역이 풀리지 않습니다.
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", () => {
+      editEl.focus();
+      if (savedRange) {
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(savedRange);
       }
-    };
-    editEl.addEventListener("keyup", saveSelection);
-    editEl.addEventListener("mouseup", saveSelection);
-    toolbar.querySelectorAll(".rt-btn").forEach(btn => {
-      // mousedown에서 기본 동작을 막아야 버튼을 눌러도 에디터의 선택 영역이 풀리지 않습니다.
-      btn.addEventListener("mousedown", (e) => e.preventDefault());
-      btn.addEventListener("click", () => {
-        editEl.focus();
-        if (savedRange) {
-          const sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(savedRange);
-        }
-        if (btn.dataset.cmd === "bold") {
-          document.execCommand("bold");
-        } else if (btn.dataset.cmd === "removeFormat") {
-          document.execCommand("removeFormat");
-        } else if (btn.dataset.color) {
-          document.execCommand("foreColor", false, btn.dataset.color);
-        } else if (btn.classList.contains("rt-size")) {
-          wrapSelectionWithClass(editEl, btn.dataset.size);
-        }
-        saveSelection();
-      });
+      if (btn.dataset.cmd === "bold") {
+        document.execCommand("bold");
+      } else if (btn.dataset.cmd === "removeFormat") {
+        document.execCommand("removeFormat");
+      } else if (btn.dataset.color) {
+        document.execCommand("foreColor", false, btn.dataset.color);
+      } else if (btn.classList.contains("rt-size")) {
+        wrapSelectionWithClass(editEl, btn.dataset.size);
+      }
+      saveSelection();
     });
   });
+}
+function wireRichtextToolbars(formFields) {
+  formFields.filter(f => f.type === "richtext").forEach(f => {
+    wireRichtextToolbarFor(document.getElementById(`f_${f.key}`), document.querySelector(`.rt-toolbar[data-for="${f.key}"]`));
+  });
+}
+function richTextIsEmpty(html) {
+  return !String(html || "").replace(/<[^>]*>/g, "").trim();
 }
 const RICHTEXT_ALLOWED_TAGS = new Set([
   "P","BR","STRONG","B","EM","I","U","UL","OL","LI","TABLE","THEAD","TBODY","TR","TD","TH",
