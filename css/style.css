@@ -97,6 +97,7 @@ a { color: inherit; }
 }
 .richtext-edit .rt-small { font-size: 11px; }
 .richtext-edit .rt-large { font-size: 19px; }
+.kt-edit { min-height: 80px; max-height: 260px; }
 
 .rt-toolbar {
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
