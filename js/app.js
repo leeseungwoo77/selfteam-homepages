@@ -515,7 +515,21 @@ function expandMergedGrid(rowEls) {
 
 
 /* ===================== 전역 상태 ===================== */
-const state = { user:null, profile:null, branches:[], customFolders:[], menuOverrides:{}, currentSection:"schedule", branchFilter:{}, navExpanded:{} };
+const state = { user:null, profile:null, branches:[], customFolders:[], menuOverrides:{}, currentSection:"schedule", branchFilter:{}, navExpanded:{}, openTabs:[] };
+
+function tabStorageKey() {
+  return "selfteam_openTabs_" + (state.user ? state.user.uid : "anon");
+}
+function loadOpenTabs() {
+  try {
+    const raw = localStorage.getItem(tabStorageKey());
+    const parsed = raw ? JSON.parse(raw) : null;
+    state.openTabs = Array.isArray(parsed) ? parsed : [];
+  } catch (err) { state.openTabs = []; }
+}
+function saveOpenTabs() {
+  try { localStorage.setItem(tabStorageKey(), JSON.stringify(state.openTabs)); } catch (err) { /* 무시 */ }
+}
 
 /* ===================== 인증 확인 ===================== */
 onAuthStateChanged(auth, async (user) => {
@@ -543,7 +557,10 @@ onAuthStateChanged(auth, async (user) => {
   await loadBranches();
   await loadCustomFolders();
   await loadMenuOverrides();
+  loadOpenTabs();
+  if (!state.openTabs.includes(state.currentSection)) state.openTabs.unshift(state.currentSection);
   buildNav();
+  renderTabBar();
   renderSection(state.currentSection);
 });
 
@@ -697,6 +714,67 @@ function getSectionByKey(key) {
   return s ? withOverride(s) : null;
 }
 
+/* ===================== 상단 탭 바 ===================== */
+function tabMeta(key) {
+  if (key === "admin") return { label: "지점 · 팀원 관리", color: "#9CA88F" };
+  const s = getSectionByKey(key);
+  return s ? { label: s.label, color: COLOR_HEX[s.color] || "#9CA88F" } : null;
+}
+function renderTabBar() {
+  const bar = document.getElementById("tabBar");
+  if (!bar) return;
+  // 더 이상 존재하지 않는(삭제된 폴더 등) 탭은 자동으로 정리합니다.
+  const before = state.openTabs.length;
+  state.openTabs = state.openTabs.filter(k => tabMeta(k));
+  if (state.openTabs.length !== before) saveOpenTabs();
+
+  if (!state.openTabs.length) { bar.innerHTML = ""; bar.style.display = "none"; return; }
+  bar.style.display = "flex";
+  bar.innerHTML = state.openTabs.map(key => {
+    const meta = tabMeta(key);
+    const active = key === state.currentSection;
+    return `<div class="tab-item ${active ? "active" : ""}" data-tab-key="${key}" style="--tab-color:${meta.color}">
+      <span class="dot" style="background:${meta.color};"></span>
+      <span>${escapeHtml(meta.label)}</span>
+      <span class="tab-close" data-close-key="${key}">×</span>
+    </div>`;
+  }).join("");
+  bar.querySelectorAll("[data-tab-key]").forEach(el => {
+    el.onclick = () => goToSection(el.dataset.tabKey);
+  });
+  bar.querySelectorAll("[data-close-key]").forEach(el => {
+    el.onclick = (e) => { e.stopPropagation(); closeTab(el.dataset.closeKey); };
+  });
+  const activeEl = bar.querySelector(".tab-item.active");
+  if (activeEl) activeEl.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+function goToSection(key, branchId) {
+  state.currentSection = key;
+  if (branchId !== undefined) state.branchFilter[key] = branchId;
+  if (!state.openTabs.includes(key)) state.openTabs.push(key);
+  saveOpenTabs();
+  renderTabBar();
+  renderSection(key);
+  closeMobileNav();
+}
+function closeTab(key) {
+  const idx = state.openTabs.indexOf(key);
+  if (idx === -1) return;
+  state.openTabs.splice(idx, 1);
+  saveOpenTabs();
+  if (state.currentSection === key) {
+    const fallback = state.openTabs[idx] || state.openTabs[idx - 1] || state.openTabs[0];
+    if (fallback) {
+      goToSection(fallback);
+      return;
+    }
+    // 남은 탭이 하나도 없으면 팀장 일정으로 돌아갑니다.
+    goToSection("schedule");
+    return;
+  }
+  renderTabBar();
+}
+
 /* ===================== 사이드바 네비게이션 ===================== */
 function buildNav() {
   const nav = document.getElementById("navGroups");
@@ -742,20 +820,13 @@ function buildNav() {
         buildNav();
         return;
       }
-      state.currentSection = key;
-      renderSection(key);
-      closeMobileNav();
+      goToSection(key);
     };
   });
   nav.querySelectorAll(".nav-subitem").forEach(el => {
     el.onclick = (e) => {
       e.stopPropagation();
-      const key = el.dataset.key;
-      const branchId = el.dataset.branch || null;
-      state.currentSection = key;
-      state.branchFilter[key] = branchId;
-      renderSection(key);
-      closeMobileNav();
+      goToSection(el.dataset.key, el.dataset.branch || null);
     };
   });
 }
@@ -768,6 +839,7 @@ function markActiveNav(key) {
   const branchId = state.branchFilter[key] || "";
   document.querySelectorAll(".nav-item").forEach(el => el.classList.toggle("active", el.dataset.key === key));
   document.querySelectorAll(".nav-subitem").forEach(el => el.classList.toggle("active", el.dataset.key === key && (el.dataset.branch || "") === branchId));
+  renderTabBar();
 }
 
 /* ===================== 권한 판단 ===================== */
