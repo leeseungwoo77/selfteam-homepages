@@ -2058,16 +2058,67 @@ function overallAchievement(krs) {
   return Math.round(krs.reduce((s, k) => s + krAchievement(k), 0) / krs.length);
 }
 
-/* ===================== 지표 분석 - 연결한 구글 시트에서 두 시점 비교 ===================== */
+/* ===================== 지표 분석 - 연결한 구글 시트에서 지점/연도/월을 자유롭게 골라 비교 ===================== */
 function extractSheetId(url) {
   const m = String(url || "").match(/\/d\/([a-zA-Z0-9-_]+)/);
   return m ? m[1] : String(url || "").trim();
 }
 function parseMetricNumber(raw) {
   if (raw === undefined || raw === null || raw === "") return null;
-  const cleaned = String(raw).replace(/[,\s원%₩]/g, "").replace(/^\((.*)\)$/, "-$1");
+  const s = String(raw).trim();
+  if (/^#/.test(s)) return null; // #DIV/0! 같은 에러 셀
+  const cleaned = s.replace(/[,\s원%₩]/g, "").replace(/^\((.*)\)$/, "-$1");
   const n = parseFloat(cleaned);
   return isNaN(n) ? null : n;
+}
+async function fetchSheetTabNames(spreadsheetId) {
+  if (!googleAccessToken) await requestGoogleAuth();
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`;
+  let res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
+  if (res.status === 401) {
+    googleAccessToken = null;
+    await requestGoogleAuth();
+    res = await fetch(url, { headers: { Authorization: `Bearer ${googleAccessToken}` } });
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error?.message || `시트 목록을 불러오지 못했습니다 (${res.status})`);
+  }
+  const data = await res.json();
+  return (data.sheets || []).map(s => s.properties.title);
+}
+// 이 조직의 시트 형식: A열=지표명(4줄에 한 번씩만 표시), B열=연도, C열부터=1월~12월(과 다음해 1~2월) 값.
+// 같은 지표가 연도별로 4줄씩 반복되고, 빈 줄로 지표 사이가 구분됩니다.
+function parseMetricSheet(rows) {
+  if (!rows || !rows.length) return { months: [], years: [], metrics: {}, metricOrder: [] };
+  const header = rows[0] || [];
+  const months = header.slice(2).map(m => (m || "").toString().trim()).filter(Boolean);
+  const metrics = {};
+  const metricOrder = [];
+  const yearSet = new Set();
+  let currentMetric = null;
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const label = (row[0] || "").toString().trim();
+    const yearLabel = (row[1] || "").toString().trim();
+    if (!yearLabel) { currentMetric = null; continue; } // 빈 구분 줄
+    if (label) currentMetric = label;
+    if (!currentMetric) continue;
+    if (!metrics[currentMetric]) { metrics[currentMetric] = {}; metricOrder.push(currentMetric); }
+    const monthVals = {};
+    months.forEach((m, idx) => { monthVals[m] = parseMetricNumber(row[2 + idx]); });
+    metrics[currentMetric][yearLabel] = monthVals;
+    yearSet.add(yearLabel);
+  }
+  return { months, years: [...yearSet], metrics, metricOrder };
+}
+function aggregateMetric(parsed, metricName, yearLabel, monthLabels, mode) {
+  const yearData = parsed.metrics[metricName] && parsed.metrics[metricName][yearLabel];
+  if (!yearData) return null;
+  const vals = monthLabels.map(m => yearData[m]).filter(v => v !== null && v !== undefined);
+  if (!vals.length) return null;
+  const sum = vals.reduce((a, b) => a + b, 0);
+  return mode === "sum" ? sum : sum / vals.length;
 }
 
 async function renderMetricAnalysis(section) {
@@ -2084,27 +2135,30 @@ async function renderMetricAnalysis(section) {
     ${isLeader ? `
     <div class="card">
       <h2>연결할 구글 시트 설정</h2>
-      <form id="metricSheetForm" class="grid-3" style="align-items:end;">
-        <div class="field" style="margin:0;grid-column:span 2;"><label>구글 시트 URL</label>
+      <form id="metricSheetForm" class="grid-2" style="align-items:end;">
+        <div class="field" style="margin:0;"><label>구글 시트 URL</label>
           <input type="text" id="metricSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/..." value="${escapeHtml(folder?.sheetUrl || "")}">
         </div>
-        <div class="field" style="margin:0;"><label>탭(시트) 이름</label>
-          <input type="text" id="metricSheetTab" placeholder="예: 지표_2023-2026" value="${escapeHtml(folder?.sheetTab || "")}">
-        </div>
-        <button class="btn" type="submit" style="grid-column: span 3;">저장</button>
+        <button class="btn" type="submit">저장</button>
       </form>
-      <p style="font-size:11px;color:var(--text-muted);margin:10px 0 0;">시트의 <strong>첫 줄은 월/기간</strong>(예: 2023-01, 2023-02...), <strong>첫 열은 지표 이름</strong>으로 되어 있어야 해요.</p>
+      <p style="font-size:11px;color:var(--text-muted);margin:10px 0 0;">시트 안의 <strong>탭(지점)들을 자동으로 찾아서</strong> 아래 지점 선택란에 채워드려요. 각 탭은 A열=지표명, B열=연도, C열부터 1~12월 값 형식이어야 해요.</p>
     </div>` : ""}
     <div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button class="btn small" id="googleAuthBtnMetric" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
       <span id="metricLoadStatus" style="font-size:12px;color:var(--text-muted);"></span>
     </div>
     <div class="card" id="metricCompareCard" style="display:none;">
-      <h2>비교할 두 시점 선택</h2>
-      <div class="grid-3" style="align-items:end;">
-        <div class="field" style="margin:0;"><label>시점 A (기준)</label><select id="metricPeriodA"></select></div>
-        <div class="field" style="margin:0;"><label>시점 B (비교 대상)</label><select id="metricPeriodB"></select></div>
-        <button class="btn" id="metricCompareBtn" type="button">비교하기</button>
+      <h2>비교할 두 기준 선택</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지점을 다르게 고르면 지점끼리, 연도를 다르게 고르면 전년 동월 비교, 월을 1~3개 고르면 그 기간 합계/평균으로 비교돼요.</p>
+      <div class="grid-2" style="align-items:start;gap:16px;">
+        <div id="groupA-holder"></div>
+        <div id="groupB-holder"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;margin-top:16px;flex-wrap:wrap;">
+        <div style="font-size:12.5px;font-weight:700;">여러 달을 골랐을 때:</div>
+        <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="metricAggMode" value="avg" checked> 평균</label>
+        <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="metricAggMode" value="sum"> 합계</label>
+        <button class="btn" id="metricCompareBtn" type="button" style="width:auto;padding:10px 24px;margin-left:auto;">비교하기</button>
       </div>
     </div>
     <div class="card" style="overflow:auto;"><div id="metricResultWrap"></div></div>`;
@@ -2113,94 +2167,137 @@ async function renderMetricAnalysis(section) {
     document.getElementById("metricSheetForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const sheetUrl = document.getElementById("metricSheetUrl").value.trim();
-      const sheetTab = document.getElementById("metricSheetTab").value.trim();
       if (!folder) return;
-      await updateDoc(doc(db, "customFolders", folder.id), { sheetUrl, sheetTab });
+      await updateDoc(doc(db, "customFolders", folder.id), { sheetUrl });
       await loadCustomFolders();
       showToast("저장되었습니다.");
       renderSection(section.key);
     });
   }
 
-  let sheetRows = [];
-  async function loadSheetData() {
-    const statusEl = document.getElementById("metricLoadStatus");
-    if (!folder || !folder.sheetUrl || !folder.sheetTab) {
-      statusEl.textContent = isLeader ? "먼저 위에서 구글 시트를 연결해주세요." : "아직 연결된 시트가 없습니다. 팀장에게 문의하세요.";
-      return;
+  const tabCache = {}; // tabName -> parseMetricSheet 결과 (같은 탭 중복 요청 방지)
+  async function getParsedTab(spreadsheetId, tabName) {
+    if (tabCache[tabName]) return tabCache[tabName];
+    const rows = await fetchSheetValues(spreadsheetId, tabName);
+    const parsed = parseMetricSheet(rows);
+    tabCache[tabName] = parsed;
+    return parsed;
+  }
+
+  function groupSelectorHtml(prefix, title, tabNames, years, months) {
+    return `<div style="border:1.5px solid var(--border);border-radius:10px;padding:14px;">
+      <div style="font-weight:800;font-size:13px;margin-bottom:10px;">${title}</div>
+      <div class="field" style="margin:0 0 10px;"><label>지점</label>
+        <select id="${prefix}Branch">${tabNames.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}</select>
+      </div>
+      <div class="field" style="margin:0 0 10px;"><label>연도</label>
+        <select id="${prefix}Year">${years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("")}</select>
+      </div>
+      <div class="field" style="margin:0;"><label>월 (1~3개 선택)</label>
+        <div id="${prefix}Months" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
+          ${months.map(m => `<label style="font-size:12px;display:flex;align-items:center;gap:4px;background:#F4FAEF;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;">
+            <input type="checkbox" class="${prefix}MonthChk" value="${escapeHtml(m)}">${escapeHtml(m)}
+          </label>`).join("")}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  async function initCompareUI(tabNames, firstParsed) {
+    const years = [...firstParsed.years].sort();
+    const months = firstParsed.months;
+    document.getElementById("groupA-holder").innerHTML = groupSelectorHtml("gA", "기준 A", tabNames, years, months);
+    document.getElementById("groupB-holder").innerHTML = groupSelectorHtml("gB", "기준 B", tabNames, years, months);
+    // 기본값: 최근 두 연도를 서로 다르게 미리 골라 놔서 전년 동월 비교가 바로 되게 합니다.
+    if (years.length > 1) {
+      document.getElementById("gAYear").value = years[years.length - 2];
+      document.getElementById("gBYear").value = years[years.length - 1];
     }
-    statusEl.textContent = "불러오는 중...";
-    try {
-      const spreadsheetId = extractSheetId(folder.sheetUrl);
-      sheetRows = await fetchSheetValues(spreadsheetId, folder.sheetTab);
-      if (!sheetRows.length) { statusEl.textContent = "시트에서 데이터를 찾을 수 없어요."; return; }
-      statusEl.textContent = `불러왔어요 (지표 ${sheetRows.length - 1}개, 기간 ${sheetRows[0].length - 1}개).`;
-      const header = sheetRows[0];
-      const periodOptA = document.getElementById("metricPeriodA");
-      const periodOptB = document.getElementById("metricPeriodB");
-      const opts = header.map((h, i) => i === 0 ? "" : `<option value="${i}">${escapeHtml(h)}</option>`).join("");
-      periodOptA.innerHTML = opts;
-      periodOptB.innerHTML = opts;
-      if (header.length > 2) periodOptB.value = String(header.length - 1);
-      document.getElementById("metricCompareCard").style.display = "block";
-    } catch (err) {
-      statusEl.textContent = "불러오기 실패: " + err.message;
+    if (months.length) {
+      document.querySelector(`.gAMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
+      document.querySelector(`.gBMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
     }
+    document.getElementById("metricCompareCard").style.display = "block";
   }
 
   document.getElementById("googleAuthBtnMetric").onclick = async () => {
     const btn = document.getElementById("googleAuthBtnMetric");
+    const statusEl = document.getElementById("metricLoadStatus");
+    if (!folder || !folder.sheetUrl) { statusEl.textContent = isLeader ? "먼저 위에서 구글 시트를 연결해주세요." : "아직 연결된 시트가 없습니다. 팀장에게 문의하세요."; return; }
     btn.disabled = true;
+    statusEl.textContent = "불러오는 중...";
     try {
       await requestGoogleAuth();
       btn.textContent = "다시 연결";
-      await loadSheetData();
+      const spreadsheetId = extractSheetId(folder.sheetUrl);
+      const tabNames = await fetchSheetTabNames(spreadsheetId);
+      if (!tabNames.length) { statusEl.textContent = "시트에서 탭을 찾을 수 없어요."; return; }
+      const firstParsed = await getParsedTab(spreadsheetId, tabNames[0]);
+      await initCompareUI(tabNames, firstParsed);
+      statusEl.textContent = `지점 ${tabNames.length}개, 지표 ${firstParsed.metricOrder.length}개를 찾았어요.`;
+
+      document.getElementById("metricCompareBtn").onclick = async () => {
+        const resultWrap = document.getElementById("metricResultWrap");
+        const monthsA = [...document.querySelectorAll(".gAMonthChk:checked")].map(el => el.value);
+        const monthsB = [...document.querySelectorAll(".gBMonthChk:checked")].map(el => el.value);
+        if (!monthsA.length || !monthsB.length) { resultWrap.innerHTML = `<div class="empty-state">양쪽 다 월을 최소 1개 선택해주세요.</div>`; return; }
+        if (monthsA.length > 3 || monthsB.length > 3) { resultWrap.innerHTML = `<div class="empty-state">월은 최대 3개까지 고를 수 있어요.</div>`; return; }
+        const mode = document.querySelector('input[name="metricAggMode"]:checked').value;
+        const branchA = document.getElementById("gABranch").value;
+        const branchB = document.getElementById("gBBranch").value;
+        const yearA = document.getElementById("gAYear").value;
+        const yearB = document.getElementById("gBYear").value;
+
+        resultWrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
+        try {
+          const spreadsheetId = extractSheetId(folder.sheetUrl);
+          const [parsedA, parsedB] = await Promise.all([getParsedTab(spreadsheetId, branchA), getParsedTab(spreadsheetId, branchB)]);
+          const metricNames = [...new Set([...parsedA.metricOrder, ...parsedB.metricOrder])];
+          const labelA = `${branchA} · ${yearA} · ${monthsA.join("·")}`;
+          const labelB = `${branchB} · ${yearB} · ${monthsB.join("·")}`;
+
+          const results = metricNames.map(name => {
+            const valA = aggregateMetric(parsedA, name, yearA, monthsA, mode);
+            const valB = aggregateMetric(parsedB, name, yearB, monthsB, mode);
+            const diff = (valA !== null && valB !== null) ? valB - valA : null;
+            const pct = (diff !== null && valA) ? (diff / Math.abs(valA)) * 100 : null;
+            return { name, valA, valB, diff, pct };
+          });
+
+          const fmt = (n) => n === null ? "-" : (Math.abs(n) < 5 ? n.toFixed(3) : n.toLocaleString(undefined, { maximumFractionDigits: 1 }));
+          resultWrap.innerHTML = `<table><thead><tr>
+              <th>지표</th><th>${escapeHtml(labelA)}</th><th>${escapeHtml(labelB)}</th><th>증감</th><th>증감율</th>
+            </tr></thead><tbody>
+            ${results.map(r => {
+              const up = r.diff !== null && r.diff > 0;
+              const down = r.diff !== null && r.diff < 0;
+              const arrow = up ? "▲" : down ? "▼" : "-";
+              const tone = up ? "var(--green-deep)" : down ? "var(--danger)" : "var(--text-muted)";
+              return `<tr>
+                <td style="font-weight:700;">${escapeHtml(r.name)}</td>
+                <td>${fmt(r.valA)}</td>
+                <td>${fmt(r.valB)}</td>
+                <td class="mono" style="color:${tone};font-weight:700;">${r.diff !== null ? `${arrow} ${fmt(Math.abs(r.diff))}` : "-"}</td>
+                <td class="mono" style="color:${tone};font-weight:700;">${r.pct !== null ? `${arrow} ${Math.abs(r.pct).toFixed(1)}%` : "-"}</td>
+              </tr>`;
+            }).join("")}
+          </tbody></table>`;
+        } catch (err) {
+          resultWrap.innerHTML = `<div class="empty-state">비교 중 오류: ${escapeHtml(err.message)}</div>`;
+        }
+      };
     } catch (err) {
-      alert("구글 인증 오류: " + err.message);
+      statusEl.textContent = "불러오기 실패: " + err.message;
     } finally {
       btn.disabled = false;
     }
   };
 
-  document.getElementById("metricCompareBtn").onclick = () => {
-    const colA = parseInt(document.getElementById("metricPeriodA").value, 10);
-    const colB = parseInt(document.getElementById("metricPeriodB").value, 10);
-    const resultWrap = document.getElementById("metricResultWrap");
-    if (!colA || !colB) { resultWrap.innerHTML = `<div class="empty-state">두 시점을 모두 선택해주세요.</div>`; return; }
-    if (colA === colB) { resultWrap.innerHTML = `<div class="empty-state">서로 다른 두 시점을 선택해주세요.</div>`; return; }
-    const header = sheetRows[0];
-    const metricRows = sheetRows.slice(1).filter(r => (r[0] || "").trim());
-
-    const results = metricRows.map(r => {
-      const valA = parseMetricNumber(r[colA]);
-      const valB = parseMetricNumber(r[colB]);
-      const diff = (valA !== null && valB !== null) ? valB - valA : null;
-      const pct = (diff !== null && valA) ? (diff / Math.abs(valA)) * 100 : null;
-      return { name: r[0], rawA: r[colA] ?? "", rawB: r[colB] ?? "", diff, pct };
-    });
-
-    resultWrap.innerHTML = `<table><thead><tr>
-        <th>지표</th><th>${escapeHtml(header[colA])}</th><th>${escapeHtml(header[colB])}</th><th>증감</th><th>증감율</th>
-      </tr></thead><tbody>
-      ${results.map(r => {
-        const up = r.diff !== null && r.diff > 0;
-        const down = r.diff !== null && r.diff < 0;
-        const arrow = up ? "▲" : down ? "▼" : "-";
-        const tone = up ? "var(--green-deep)" : down ? "var(--danger)" : "var(--text-muted)";
-        return `<tr>
-          <td style="font-weight:700;">${escapeHtml(r.name)}</td>
-          <td>${escapeHtml(String(r.rawA))}</td>
-          <td>${escapeHtml(String(r.rawB))}</td>
-          <td class="mono" style="color:${tone};font-weight:700;">${r.diff !== null ? `${arrow} ${Math.abs(r.diff).toLocaleString()}` : "-"}</td>
-          <td class="mono" style="color:${tone};font-weight:700;">${r.pct !== null ? `${arrow} ${Math.abs(r.pct).toFixed(1)}%` : "-"}</td>
-        </tr>`;
-      }).join("")}
-    </tbody></table>`;
-  };
-
-  if (googleAccessToken) await loadSheetData();
-  else document.getElementById("metricLoadStatus").textContent = "위 '구글 계정으로 연결' 버튼을 눌러 로그인해주세요.";
+  if (!googleAccessToken) {
+    document.getElementById("metricLoadStatus").textContent = "위 '구글 계정으로 연결' 버튼을 눌러 로그인해주세요.";
+  }
 }
+
 
 async function renderOkrFolder(section) {
   const main = document.getElementById("mainContent");
