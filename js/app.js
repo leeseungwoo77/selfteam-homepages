@@ -2147,6 +2147,10 @@ async function renderMetricAnalysis(section) {
       <button class="btn small" id="googleAuthBtnMetric" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
       <span id="metricLoadStatus" style="font-size:12px;color:var(--text-muted);"></span>
     </div>
+    <div id="metricModeToggle" style="display:none;gap:8px;margin-bottom:6px;">
+      <button class="btn small" id="modeTwoBtn" type="button">두 기준 비교</button>
+      <button class="btn small secondary" id="modeAllBtn" type="button">지표 하나로 전체 지점 비교</button>
+    </div>
     <div class="card" id="metricCompareCard" style="display:none;">
       <h2>비교할 두 기준 선택</h2>
       <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지점을 다르게 고르면 지점끼리, 연도를 다르게 고르면 전년 동월 비교, 월을 1~3개 고르면 그 기간 합계/평균으로 비교돼요.</p>
@@ -2159,6 +2163,24 @@ async function renderMetricAnalysis(section) {
         <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="metricAggMode" value="avg" checked> 평균</label>
         <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="metricAggMode" value="sum"> 합계</label>
         <button class="btn" id="metricCompareBtn" type="button" style="width:auto;padding:10px 24px;margin-left:auto;">비교하기</button>
+      </div>
+    </div>
+    <div class="card" id="metricAllCard" style="display:none;">
+      <h2>지표 하나로 5개 지점 전체 비교</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지표 하나와 시점(연도·월 1~3개)을 고르면, 그 시점 기준으로 모든 지점을 나란히 보여드려요.</p>
+      <div class="grid-3" style="align-items:end;gap:16px;">
+        <div class="field" style="margin:0;"><label>지표</label><select id="allMetricSelect"></select></div>
+        <div class="field" style="margin:0;"><label>연도</label><select id="allYearSelect"></select></div>
+        <div class="field" style="margin:0;">
+          <label>월 (1~3개 선택)</label>
+          <div id="allMonthsHolder" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;margin-top:16px;flex-wrap:wrap;">
+        <div style="font-size:12.5px;font-weight:700;">여러 달을 골랐을 때:</div>
+        <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="metricAllAggMode" value="avg" checked> 평균</label>
+        <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="metricAllAggMode" value="sum"> 합계</label>
+        <button class="btn" id="metricAllCompareBtn" type="button" style="width:auto;padding:10px 24px;margin-left:auto;">비교하기</button>
       </div>
     </div>
     <div class="card" style="overflow:auto;"><div id="metricResultWrap"></div></div>`;
@@ -2217,8 +2239,29 @@ async function renderMetricAnalysis(section) {
       document.querySelector(`.gAMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
       document.querySelector(`.gBMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
     }
+
+    // "지표 하나로 전체 지점 비교" 탭도 같이 채워둡니다.
+    document.getElementById("allMetricSelect").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    document.getElementById("allYearSelect").innerHTML = years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
+    document.getElementById("allYearSelect").value = years[years.length - 1];
+    document.getElementById("allMonthsHolder").innerHTML = months.map(m => `<label style="font-size:12px;display:flex;align-items:center;gap:4px;background:#F4FAEF;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;">
+      <input type="checkbox" class="allMonthChk" value="${escapeHtml(m)}">${escapeHtml(m)}
+    </label>`).join("");
+    if (months.length) document.querySelector(`.allMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
+
+    document.getElementById("metricModeToggle").style.display = "flex";
     document.getElementById("metricCompareCard").style.display = "block";
   }
+
+  function setCompareMode(mode) {
+    document.getElementById("metricCompareCard").style.display = mode === "two" ? "block" : "none";
+    document.getElementById("metricAllCard").style.display = mode === "all" ? "block" : "none";
+    document.getElementById("modeTwoBtn").className = mode === "two" ? "btn small" : "btn small secondary";
+    document.getElementById("modeAllBtn").className = mode === "all" ? "btn small" : "btn small secondary";
+    document.getElementById("metricResultWrap").innerHTML = "";
+  }
+  document.getElementById("modeTwoBtn").onclick = () => setCompareMode("two");
+  document.getElementById("modeAllBtn").onclick = () => setCompareMode("all");
 
   document.getElementById("googleAuthBtnMetric").onclick = async () => {
     const btn = document.getElementById("googleAuthBtnMetric");
@@ -2234,6 +2277,7 @@ async function renderMetricAnalysis(section) {
       if (!tabNames.length) { statusEl.textContent = "시트에서 탭을 찾을 수 없어요."; return; }
       const firstParsed = await getParsedTab(spreadsheetId, tabNames[0]);
       await initCompareUI(tabNames, firstParsed);
+      setCompareMode("two");
       statusEl.textContent = `지점 ${tabNames.length}개, 지표 ${firstParsed.metricOrder.length}개를 찾았어요.`;
 
       document.getElementById("metricCompareBtn").onclick = async () => {
@@ -2279,6 +2323,47 @@ async function renderMetricAnalysis(section) {
                 <td>${fmt(r.valB)}</td>
                 <td class="mono" style="color:${tone};font-weight:700;">${r.diff !== null ? `${arrow} ${fmt(Math.abs(r.diff))}` : "-"}</td>
                 <td class="mono" style="color:${tone};font-weight:700;">${r.pct !== null ? `${arrow} ${Math.abs(r.pct).toFixed(1)}%` : "-"}</td>
+              </tr>`;
+            }).join("")}
+          </tbody></table>`;
+        } catch (err) {
+          resultWrap.innerHTML = `<div class="empty-state">비교 중 오류: ${escapeHtml(err.message)}</div>`;
+        }
+      };
+
+      document.getElementById("metricAllCompareBtn").onclick = async () => {
+        const resultWrap = document.getElementById("metricResultWrap");
+        const metricName = document.getElementById("allMetricSelect").value;
+        const year = document.getElementById("allYearSelect").value;
+        const monthsSel = [...document.querySelectorAll(".allMonthChk:checked")].map(el => el.value);
+        if (!monthsSel.length) { resultWrap.innerHTML = `<div class="empty-state">월을 최소 1개 선택해주세요.</div>`; return; }
+        if (monthsSel.length > 3) { resultWrap.innerHTML = `<div class="empty-state">월은 최대 3개까지 고를 수 있어요.</div>`; return; }
+        const mode = document.querySelector('input[name="metricAllAggMode"]:checked').value;
+
+        resultWrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
+        try {
+          const spreadsheetId = extractSheetId(folder.sheetUrl);
+          const parsedByBranch = {};
+          await Promise.all(tabNames.map(async t => { parsedByBranch[t] = await getParsedTab(spreadsheetId, t); }));
+
+          const results = tabNames.map(t => ({
+            branch: t,
+            value: aggregateMetric(parsedByBranch[t], metricName, year, monthsSel, mode)
+          })).sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
+
+          const maxAbs = Math.max(1, ...results.map(r => Math.abs(r.value ?? 0)));
+          const fmt = (n) => n === null ? "-" : (Math.abs(n) < 5 ? n.toFixed(3) : n.toLocaleString(undefined, { maximumFractionDigits: 1 }));
+          const periodLabel = `${year} · ${monthsSel.join("·")} (${mode === "sum" ? "합계" : "평균"})`;
+
+          resultWrap.innerHTML = `<p style="font-size:12.5px;color:var(--text-muted);margin:0 0 12px;"><strong>${escapeHtml(metricName)}</strong> · ${escapeHtml(periodLabel)}</p>
+            <table><thead><tr><th>지점</th><th>값</th><th style="width:40%;"></th></tr></thead><tbody>
+            ${results.map(r => {
+              const barPct = r.value === null ? 0 : Math.max(2, Math.round((Math.abs(r.value) / maxAbs) * 100));
+              const barColor = matchLocationColor(r.branch) || "var(--blue-deep)";
+              return `<tr>
+                <td style="font-weight:700;">${escapeHtml(r.branch)}</td>
+                <td class="mono" style="font-weight:700;">${fmt(r.value)}</td>
+                <td><div style="background:#EAF3E3;border-radius:6px;height:16px;overflow:hidden;"><div style="background:${barColor};height:100%;width:${barPct}%;"></div></div></td>
               </tr>`;
             }).join("")}
           </tbody></table>`;
