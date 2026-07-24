@@ -2747,6 +2747,29 @@ function clearSelectionFormatting(editEl) {
   range.insertNode(document.createTextNode(text));
 }
 // 폼이 그려진 뒤, richtext 필드마다 도구모음 버튼에 실제 동작을 연결합니다.
+function positionToolbarFloating(toolbar, rect) {
+  if (!toolbar.dataset.staticTop) {
+    // 원래 자리(에디터 바로 위)로 되돌릴 수 있도록 처음 한 번만 기억해둡니다.
+    toolbar.dataset.staticTop = "1";
+  }
+  const top = Math.max(8, rect.top - toolbar.offsetHeight - 8);
+  const left = Math.min(
+    Math.max(8, rect.left + rect.width / 2 - toolbar.offsetWidth / 2),
+    window.innerWidth - toolbar.offsetWidth - 8
+  );
+  toolbar.style.position = "fixed";
+  toolbar.style.top = top + "px";
+  toolbar.style.left = left + "px";
+  toolbar.style.zIndex = "200";
+  toolbar.classList.add("rt-toolbar-floating");
+}
+function resetToolbarPosition(toolbar) {
+  toolbar.style.position = "";
+  toolbar.style.top = "";
+  toolbar.style.left = "";
+  toolbar.style.zIndex = "";
+  toolbar.classList.remove("rt-toolbar-floating");
+}
 function wireRichtextToolbarFor(editEl, toolbar) {
   if (!editEl || !toolbar) return;
   let savedRange = null;
@@ -2756,8 +2779,22 @@ function wireRichtextToolbarFor(editEl, toolbar) {
       savedRange = sel.getRangeAt(0).cloneRange();
     }
   };
-  editEl.addEventListener("keyup", saveSelection);
-  editEl.addEventListener("mouseup", saveSelection);
+  // 글자를 드래그해서 선택하면, 도구모음이 선택 영역 바로 위로 떠서 따라옵니다 (스크롤해서 위로 안 올라가도 돼요).
+  const updateFloatingToolbar = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed && editEl.contains(sel.anchorNode) && editEl.contains(sel.focusNode)) {
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      if (rect.width > 0 || rect.height > 0) { positionToolbarFloating(toolbar, rect); return; }
+    }
+    resetToolbarPosition(toolbar);
+  };
+  editEl.addEventListener("keyup", () => { saveSelection(); updateFloatingToolbar(); });
+  editEl.addEventListener("mouseup", () => { saveSelection(); updateFloatingToolbar(); });
+  document.addEventListener("mousedown", (e) => {
+    if (e.target !== editEl && !editEl.contains(e.target) && e.target !== toolbar && !toolbar.contains(e.target)) {
+      resetToolbarPosition(toolbar);
+    }
+  });
   toolbar.querySelectorAll(".rt-btn").forEach(btn => {
     // mousedown에서 기본 동작을 막아야 버튼을 눌러도 에디터의 선택 영역이 풀리지 않습니다.
     btn.addEventListener("mousedown", (e) => e.preventDefault());
@@ -2780,6 +2817,7 @@ function wireRichtextToolbarFor(editEl, toolbar) {
         wrapSelectionWithClass(editEl, btn.dataset.size);
       }
       saveSelection();
+      resetToolbarPosition(toolbar);
     });
   });
 }
