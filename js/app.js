@@ -262,7 +262,8 @@ async function renderMonthlySchedule(section) {
       <button class="btn small secondary" id="cellClearFormatBtn" type="button">자동 서식으로 되돌리기</button>
       <span id="activeCellHint" style="font-size:11px;color:var(--text-muted);">먼저 표에서 칸을 클릭한 뒤 색을 골라주세요.</span>
     </div>` : ""}
-    <div class="card" style="overflow:auto;max-height:calc(100vh - 190px);"><div id="scheduleCalendar">불러오는 중...</div></div>`;
+    <div id="scheduleTopScroll" style="overflow-x:auto;overflow-y:hidden;height:16px;margin-bottom:4px;"><div id="scheduleTopScrollInner" style="height:1px;"></div></div>
+    <div class="card" id="scheduleScrollCard" style="overflow:auto;max-height:calc(100vh - 190px);"><div id="scheduleCalendar">불러오는 중...</div></div>`;
 
   document.getElementById("prevMonthBtn").onclick = () => {
     scheduleViewState.month--;
@@ -347,6 +348,28 @@ async function renderMonthlySchedule(section) {
 
   html += `</tbody></table>`;
   document.getElementById("scheduleCalendar").innerHTML = html;
+
+  // 표가 옆으로 길어서 스크롤바가 화면 맨 아래에만 있으면 찾기 불편하니, 표 위에도 스크롤바를 하나 더 만들어서 서로 맞물려 움직이게 합니다.
+  const scrollCard = document.getElementById("scheduleScrollCard");
+  const topScroll = document.getElementById("scheduleTopScroll");
+  const topScrollInner = document.getElementById("scheduleTopScrollInner");
+  const scheduleTable = document.querySelector("#scheduleCalendar table");
+  if (scrollCard && topScroll && topScrollInner && scheduleTable) {
+    topScrollInner.style.width = scheduleTable.scrollWidth + "px";
+    let syncing = false;
+    topScroll.addEventListener("scroll", () => {
+      if (syncing) return;
+      syncing = true;
+      scrollCard.scrollLeft = topScroll.scrollLeft;
+      syncing = false;
+    });
+    scrollCard.addEventListener("scroll", () => {
+      if (syncing) return;
+      syncing = true;
+      topScroll.scrollLeft = scrollCard.scrollLeft;
+      syncing = false;
+    });
+  }
 
   let activeCellInput = null;
 
