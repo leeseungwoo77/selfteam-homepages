@@ -104,6 +104,10 @@ a { color: inherit; }
   padding: 6px 8px; background: #F0F5EA; border: 1.5px solid var(--border); border-bottom: none;
   border-radius: 10px 10px 0 0;
 }
+.rt-toolbar.rt-toolbar-floating {
+  border: 1.5px solid var(--border); border-radius: 10px; box-shadow: 0 8px 20px rgba(20,30,15,0.22);
+  flex-wrap: nowrap;
+}
 .rt-btn {
   width: 26px; height: 24px; border: 1px solid var(--border); background: #fff; border-radius: 6px;
   font-size: 11px; font-family: var(--font-display); cursor: pointer; padding: 0;
