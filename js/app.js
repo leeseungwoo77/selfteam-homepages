@@ -1358,32 +1358,71 @@ async function renderMeetingGrid(section) {
 function openMeetingDetailModal(section, entry) {
   const root = document.getElementById("modalRoot");
   const canEdit = canEditDoc(section, entry);
+  // 뷰어(대표님/이사님)는 원래 글을 못 고치지만, 읽으면서 밑줄·색으로 표시는 할 수 있게 허용합니다.
+  const canAnnotate = canEdit || state.profile.role === "viewer";
   const imageField = section.fields.find(f => f.type === "imageUpload");
   const attachments = (imageField && entry[imageField.key]) || [];
-  const fieldRows = section.fields
-    .filter(f => f.type !== "branchSelect" && f.type !== "imageUpload" && f.key !== "title" && f.key !== "date")
+  const annotatableFields = section.fields.filter(f => f.type !== "branchSelect" && f.type !== "imageUpload" && f.key !== "title" && f.key !== "date");
+  const fieldRows = annotatableFields
     .map(f => {
       const val = entry[f.key];
-      if (!val) return "";
-      const display = f.type === "richtext" ? sanitizeRichHtml(val) : escapeHtml(val).replace(/\n/g, "<br>");
-      return `<div style="margin-bottom:12px;"><div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:4px;">${f.label}</div><div class="rich-content">${display}</div></div>`;
+      if (!val && !canAnnotate) return "";
+      const display = f.type === "richtext" ? sanitizeRichHtml(val || "") : escapeHtml(val || "").replace(/\n/g, "<br>");
+      if (canAnnotate) {
+        return `<div style="margin-bottom:20px;">
+          <div style="font-size:22px;font-weight:700;color:var(--text-muted);margin-bottom:6px;">${f.label}</div>
+          ${richtextToolbarHtml(`detail_${f.key}`)}
+          <div class="rich-content meeting-detail-rich has-toolbar" id="detail_${f.key}" contenteditable="true">${display}</div>
+        </div>`;
+      }
+      return `<div style="margin-bottom:20px;"><div style="font-size:22px;font-weight:700;color:var(--text-muted);margin-bottom:6px;">${f.label}</div><div class="rich-content meeting-detail-rich">${display}</div></div>`;
     }).join("");
 
   root.innerHTML = `<div class="modal-bg" id="modalBg">
     <div class="modal" style="max-width:1440px;">
-      <h3>${escapeHtml(entry.title || "")}${entry.branchName ? " · " + escapeHtml(entry.branchName) : ""}</h3>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">${escapeHtml(entry.date || "")}</div>
+      <h3 style="font-size:32px;">${escapeHtml(entry.title || "")}${entry.branchName ? " · " + escapeHtml(entry.branchName) : ""}</h3>
+      <div style="font-size:24px;color:var(--text-muted);margin-bottom:14px;">${escapeHtml(entry.date || "")}</div>
+      ${canAnnotate ? `<p style="font-size:12px;color:var(--text-muted);margin:-6px 0 14px;">글자를 드래그해서 굵기·색·크기로 표시할 수 있어요. 표시한 내용은 "표시 저장"을 눌러야 남습니다.</p>` : ""}
       ${fieldRows || `<p style="color:var(--text-muted);font-size:13px;">등록된 내용이 없습니다.</p>`}
       ${renderAttachmentGallery(attachments)}
       <div class="grid-2" style="margin-top:10px;">
         <button type="button" class="btn secondary" id="closeDetailBtn">닫기</button>
-        ${canEdit ? `<button type="button" class="btn" id="editFromDetailBtn">수정</button>` : ""}
+        ${canAnnotate ? `<button type="button" class="btn" id="saveAnnotateBtn">표시 저장</button>` : ""}
       </div>
-      ${canEdit ? `<button type="button" class="icon-btn danger" id="deleteFromDetailBtn" style="margin-top:10px;width:100%;text-align:center;">삭제</button>` : ""}
+      <div class="grid-2" style="margin-top:10px;">
+        ${canEdit ? `<button type="button" class="btn secondary" id="editFromDetailBtn">전체 수정</button>` : "<span></span>"}
+        ${canEdit ? `<button type="button" class="icon-btn danger" id="deleteFromDetailBtn" style="text-align:center;">삭제</button>` : ""}
+      </div>
     </div></div>`;
 
   document.getElementById("closeDetailBtn").onclick = () => root.innerHTML = "";
   document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+
+  if (canAnnotate) {
+    annotatableFields.forEach(f => {
+      wireRichtextToolbarFor(document.getElementById(`detail_${f.key}`), document.querySelector(`.rt-toolbar[data-for="detail_${f.key}"]`));
+    });
+    document.getElementById("saveAnnotateBtn").onclick = async () => {
+      const btn = document.getElementById("saveAnnotateBtn");
+      btn.disabled = true;
+      btn.textContent = "저장 중...";
+      try {
+        const data = {};
+        annotatableFields.forEach(f => {
+          const el = document.getElementById(`detail_${f.key}`);
+          if (el) data[f.key] = sanitizeRichHtml(el.innerHTML);
+        });
+        await updateDoc(doc(db, section.collectionName, entry.id), data);
+        showToast("표시가 저장되었습니다.");
+        root.innerHTML = "";
+        renderSection(section.key);
+      } catch (err) {
+        alert("저장 중 오류: " + err.message);
+        btn.disabled = false;
+        btn.textContent = "표시 저장";
+      }
+    };
+  }
   if (canEdit) {
     document.getElementById("editFromDetailBtn").onclick = () => openModal(section, entry);
     document.getElementById("deleteFromDetailBtn").onclick = async () => {

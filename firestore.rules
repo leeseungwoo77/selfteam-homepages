@@ -6,6 +6,7 @@ service cloud.firestore {
     function myProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function isLeader() { return isSignedIn() && myProfile().role == 'leader'; }
     function canViewAll() { return isSignedIn() && (myProfile().role == 'leader' || myProfile().role == 'viewer'); }
+    function isViewer() { return isSignedIn() && myProfile().role == 'viewer'; }
     function myBranch() { return myProfile().branchId; }
 
     // 팀장이 "전체 메뉴 관리"에서 기존 메뉴의 작성/열람 권한을 바꾼 값이 있으면 그 값을, 없으면 defaultVal을 사용
@@ -97,8 +98,9 @@ service cloud.firestore {
     // "전체 메뉴 관리"에서 열람/작성 권한을 바꾸면 아래 규칙에도 그대로 반영됩니다.
     match /directorMeetings/{id} {
       allow read: if isSignedIn() && (canViewAll() || !sectionLeaderOnly('directorMeeting', true));
-      allow write: if isSignedIn() && (
-        isLeader() ||
+      // 뷰어(대표님/이사님)는 새 글을 쓰거나 지우진 못하지만, 읽으면서 굵기·색으로 표시(수정)하는 것만 허용합니다.
+      allow update: if isSignedIn() && (
+        isLeader() || isViewer() ||
         sectionWritable('directorMeeting', 'leader') == 'all' ||
         (sectionWritable('directorMeeting', 'leader') == 'leader-and-branch' && resource.data.branchId == myBranch())
       );
@@ -107,11 +109,16 @@ service cloud.firestore {
         sectionWritable('directorMeeting', 'leader') == 'all' ||
         (sectionWritable('directorMeeting', 'leader') == 'leader-and-branch' && request.resource.data.branchId == myBranch())
       );
+      allow delete: if isSignedIn() && (
+        isLeader() ||
+        sectionWritable('directorMeeting', 'leader') == 'all' ||
+        (sectionWritable('directorMeeting', 'leader') == 'leader-and-branch' && resource.data.branchId == myBranch())
+      );
     }
     match /memberMeetings/{id} {
       allow read: if isSignedIn() && (canViewAll() || (!sectionLeaderOnly('memberMeeting', false) && resource.data.branchId == myBranch()));
-      allow write: if isSignedIn() && (
-        isLeader() ||
+      allow update: if isSignedIn() && (
+        isLeader() || isViewer() ||
         sectionWritable('memberMeeting', 'leader-and-branch') == 'all' ||
         (sectionWritable('memberMeeting', 'leader-and-branch') == 'leader-and-branch' && resource.data.branchId == myBranch())
       );
@@ -119,6 +126,11 @@ service cloud.firestore {
         isLeader() ||
         sectionWritable('memberMeeting', 'leader-and-branch') == 'all' ||
         (sectionWritable('memberMeeting', 'leader-and-branch') == 'leader-and-branch' && request.resource.data.branchId == myBranch())
+      );
+      allow delete: if isSignedIn() && (
+        isLeader() ||
+        sectionWritable('memberMeeting', 'leader-and-branch') == 'all' ||
+        (sectionWritable('memberMeeting', 'leader-and-branch') == 'leader-and-branch' && resource.data.branchId == myBranch())
       );
     }
     match /performance/{id}      { allow read: if isSignedIn() && (canViewAll() || resource.data.branchId == myBranch());

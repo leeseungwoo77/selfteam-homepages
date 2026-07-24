@@ -125,6 +125,15 @@ a { color: inherit; }
 /* 도구모음에서 직접 지정한 글자 크기는 위 강제 축소 규칙보다 우선 적용됩니다. */
 .rich-content .rt-small { font-size: 11px !important; }
 .rich-content .rt-large { font-size: 17px !important; }
+/* 원장 미팅 상세 보기 창은 다른 곳보다 두 배 크게 보여줍니다. */
+.rich-content.meeting-detail-rich, .rich-content.meeting-detail-rich * { font-size: 26px !important; line-height: 1.6 !important; }
+.rich-content.meeting-detail-rich .rt-small { font-size: 20px !important; }
+.rich-content.meeting-detail-rich .rt-large { font-size: 34px !important; }
+.rich-content.meeting-detail-rich[contenteditable="true"] {
+  border: 1.5px solid var(--border); border-top: none; border-radius: 0 0 10px 10px;
+  padding: 14px; background: #FBFEFA; cursor: text;
+}
+.rich-content.meeting-detail-rich[contenteditable="true"]:focus { outline: none; border-color: var(--blue-bright); background: #fff; }
 
 .btn {
   width: 100%; padding: 12px; border: none; border-radius: 10px;
