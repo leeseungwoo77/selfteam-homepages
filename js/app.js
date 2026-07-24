@@ -1370,7 +1370,7 @@ function openMeetingDetailModal(section, entry) {
     }).join("");
 
   root.innerHTML = `<div class="modal-bg" id="modalBg">
-    <div class="modal">
+    <div class="modal" style="max-width:1440px;">
       <h3>${escapeHtml(entry.title || "")}${entry.branchName ? " · " + escapeHtml(entry.branchName) : ""}</h3>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">${escapeHtml(entry.date || "")}</div>
       ${fieldRows || `<p style="color:var(--text-muted);font-size:13px;">등록된 내용이 없습니다.</p>`}
