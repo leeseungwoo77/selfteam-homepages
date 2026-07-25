@@ -2256,6 +2256,66 @@ function renderSparklineSVG(points, color) {
   return `<svg viewBox="0 0 ${width} ${height}" style="width:100%;height:${height}px;display:block;"><polyline points="${ptStr}" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
 }
 
+const GRADE_POINTS = { "S": 5, "A": 4, "B+": 3, "B-": 2, "C": 1, "F": 0 };
+// 데이터 시트의 지표 이름 -> 점수표(신호등) 시트의 지표 이름. 이름 표기가 서로 달라서 직접 연결해둡니다.
+const RUBRIC_METRIC_MAP = {
+  "전체학생수": "전체 학생수",
+  "상담관리이탈율": "상담 이탈율",
+  "개별지도이탈율": "개별 이탈율",
+  "프리미엄율": "프리미엄율",
+  "수익율": "당기순이익률"
+};
+// "신호등" 탭 형식: [C열=그룹/지표명, D~I열=S,A,B+,B-,C,F] 헤더 아래로, "공통" 그룹은 각 줄이 지표(전 지점 공통 기준)이고
+// 그 외 그룹(전체 학생수, 매출 등)은 각 줄이 지점별 기준입니다.
+function parseRubricSheet(rows) {
+  const rubric = {};
+  let i = 0;
+  while (i < rows.length) {
+    const row = rows[i] || [];
+    const label = (row[2] || "").toString().trim();
+    const isHeaderRow = (row[3] || "").toString().trim() === "S" && (row[4] || "").toString().trim() === "A";
+    if (isHeaderRow && label) {
+      const groupLabel = label;
+      const entry = { mode: groupLabel === "공통" ? "universal-group" : "perBranch", perBranch: {} };
+      i++;
+      while (i < rows.length) {
+        const r2 = rows[i] || [];
+        const label2 = (r2[2] || "").toString().trim();
+        if (!label2) { i++; break; } // 빈 줄이면 이 블록 끝
+        const v = [3, 4, 5, 6, 7].map(idx => parseMetricNumber(r2[idx]));
+        const thresholds = { S: v[0], A: v[1], "B+": v[2], "B-": v[3], C: v[4] };
+        if (groupLabel === "공통") {
+          rubric[label2] = { mode: "universal", universal: thresholds };
+        } else {
+          entry.perBranch[label2] = thresholds;
+        }
+        i++;
+      }
+      if (groupLabel !== "공통") rubric[groupLabel] = entry;
+    } else {
+      i++;
+    }
+  }
+  return rubric;
+}
+function getThresholdsFor(rubricEntry, branchName) {
+  if (!rubricEntry) return null;
+  if (rubricEntry.mode === "universal") return rubricEntry.universal;
+  return rubricEntry.perBranch[branchName] || null;
+}
+function gradeForValue(thresholds, value) {
+  if (value === null || value === undefined || !thresholds) return null;
+  const S = thresholds.S, C = thresholds.C;
+  if (typeof S !== "number" || typeof C !== "number") return null;
+  const higherBetter = S >= C; // S~C가 내림차순이면 높을수록 좋은 지표, 오름차순이면 낮을수록 좋은 지표
+  for (const g of ["S", "A", "B+", "B-", "C"]) {
+    const t = thresholds[g];
+    if (typeof t !== "number") continue;
+    if (higherBetter ? value >= t : value <= t) return g;
+  }
+  return "F";
+}
+
 async function renderMetricAnalysis(section) {
   const main = document.getElementById("mainContent");
   const folder = state.customFolders.find(f => f.id === section.folderId);
@@ -2512,13 +2572,13 @@ async function renderMetricAnalysis(section) {
       <input type="checkbox" class="rankMonthChk" value="${escapeHtml(m)}">${escapeHtml(m)}
     </label>`).join("");
     if (months.length) document.querySelector(`.rankMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
-    document.getElementById("rankMetricsHolder").innerHTML = `<div style="display:grid;grid-template-columns:1fr 90px 150px;gap:8px 10px;align-items:center;max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:10px;">
-      ${firstParsed.metricOrder.map(m => `
-        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;"><input type="checkbox" class="rankMetricChk" value="${escapeHtml(m)}">${escapeHtml(m)}</label>
+    document.getElementById("rankMetricsHolder").innerHTML = `<div style="display:grid;grid-template-columns:1fr 90px;gap:8px 10px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:10px;">
+      ${firstParsed.metricOrder.filter(m => RUBRIC_METRIC_MAP[m]).map(m => `
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;"><input type="checkbox" class="rankMetricChk" value="${escapeHtml(m)}" checked>${escapeHtml(m)}</label>
         <input type="number" class="rankMetricWeight" data-metric="${escapeHtml(m)}" value="1" min="0" step="0.5">
-        <select class="rankMetricDir" data-metric="${escapeHtml(m)}"><option value="high">높을수록 좋음</option><option value="low">낮을수록 좋음</option></select>
       `).join("")}
-    </div>`;
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);margin:8px 0 0;">점수표(신호등 탭)에 기준이 있는 지표만 순위 계산에 쓸 수 있어요. 나머지 지표는 점수표가 없어서 자동으로 빠져요.</p>`;
 
     // 이상치
     document.getElementById("anomalyBranch").innerHTML = `<option value="__all__">전체 지점</option>` + tabNames.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
@@ -2672,7 +2732,8 @@ async function renderMetricAnalysis(section) {
       }
     };
 
-    // ---------- 순위 계산 실행 ----------
+    // ---------- 순위 계산 실행 (신호등 점수표 기준) ----------
+    let rubricCache = null;
     document.getElementById("rankRunBtn").onclick = async () => {
       const resultWrap = document.getElementById("metricResultWrap");
       const year = document.getElementById("rankYear").value;
@@ -2684,39 +2745,37 @@ async function renderMetricAnalysis(section) {
 
       resultWrap.innerHTML = `<div class="empty-state">계산 중...</div>`;
       try {
+        if (!rubricCache) {
+          const rubricRows = await fetchSheetValues(spreadsheetId, "신호등");
+          rubricCache = parseRubricSheet(rubricRows);
+        }
         const parsedByBranch = {};
-        await Promise.all(tabNamesG.filter(t => t !== "셀프팀").map(async t => { parsedByBranch[t] = await getParsedTab(spreadsheetId, t); }));
         const branches = tabNamesG.filter(t => t !== "셀프팀");
-
-        const perMetric = {}; // metric -> branch -> raw value
-        selectedMetrics.forEach(m => {
-          perMetric[m] = {};
-          branches.forEach(b => { perMetric[m][b] = aggregateMetric(parsedByBranch[b], m, year, monthsSel, mode); });
-        });
+        await Promise.all(branches.map(async t => { parsedByBranch[t] = await getParsedTab(spreadsheetId, t); }));
 
         const scores = {};
         branches.forEach(b => { scores[b] = { total: 0, totalWeight: 0, detail: [] }; });
 
         selectedMetrics.forEach(m => {
           const weight = parseFloat(document.querySelector(`.rankMetricWeight[data-metric="${CSS.escape(m)}"]`).value) || 0;
-          const dir = document.querySelector(`.rankMetricDir[data-metric="${CSS.escape(m)}"]`).value;
-          const vals = branches.map(b => perMetric[m][b]).filter(v => v !== null);
-          if (!vals.length || weight <= 0) return;
-          const maxV = Math.max(...vals), minV = Math.min(...vals);
+          if (weight <= 0) return;
+          const rubricLabel = RUBRIC_METRIC_MAP[m];
+          const rubricEntry = rubricLabel ? rubricCache[rubricLabel] : null;
           branches.forEach(b => {
-            const raw = perMetric[m][b];
-            if (raw === null) return;
-            let normalized = maxV === minV ? 100 : ((raw - minV) / (maxV - minV)) * 100;
-            if (dir === "low") normalized = 100 - normalized;
-            scores[b].total += normalized * weight;
+            const raw = aggregateMetric(parsedByBranch[b], m, year, monthsSel, mode);
+            const thresholds = getThresholdsFor(rubricEntry, b);
+            const grade = gradeForValue(thresholds, raw);
+            if (grade === null) return; // 점수표 기준이 없거나 값이 없으면 이 지표는 이 지점 점수에서 제외
+            const points = GRADE_POINTS[grade];
+            scores[b].total += points * weight;
             scores[b].totalWeight += weight;
-            scores[b].detail.push(`${m} ${Math.round(normalized)}점`);
+            scores[b].detail.push(`${m} ${grade}(${points}점)`);
           });
         });
 
         const ranked = branches.map(b => ({
           branch: b,
-          score: scores[b].totalWeight ? scores[b].total / scores[b].totalWeight : null,
+          score: scores[b].totalWeight ? (scores[b].total / scores[b].totalWeight) * 20 : null, // 5점 만점 -> 100점 만점
           detail: scores[b].detail
         })).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
 
@@ -2725,10 +2784,10 @@ async function renderMetricAnalysis(section) {
             <td class="mono" style="font-weight:800;">${i + 1}</td>
             <td style="font-weight:700;">${escapeHtml(r.branch)}</td>
             <td class="mono" style="font-weight:800;color:var(--blue-deep);">${r.score !== null ? r.score.toFixed(1) : "-"}</td>
-            <td style="font-size:11.5px;color:var(--text-muted);">${r.detail.map(escapeHtml).join(" · ")}</td>
+            <td style="font-size:11.5px;color:var(--text-muted);">${r.detail.map(escapeHtml).join(" · ") || "채점 가능한 지표 없음"}</td>
           </tr>`).join("")}
         </tbody></table>
-        <p style="font-size:11px;color:var(--text-muted);margin-top:10px;">각 지표는 지점 간 최고~최저를 0~100점으로 환산한 뒤 가중치를 곱해 평균낸 값이에요. "셀프팀"(본사 합계) 탭은 순위 비교에서 제외했어요.</p>`;
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px;">"신호등" 탭의 점수표(S=5점·A=4점·B+=3점·B-=2점·C=1점·F=0점) 기준으로 채점한 뒤, 가중치를 곱해 평균내고 100점 만점으로 환산한 값이에요. "셀프팀"(본사 합계) 탭은 순위 비교에서 제외했어요.</p>`;
       } catch (err) {
         resultWrap.innerHTML = `<div class="empty-state">계산 중 오류: ${escapeHtml(err.message)}</div>`;
       }
