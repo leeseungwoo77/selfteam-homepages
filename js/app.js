@@ -2120,7 +2120,7 @@ function overallAchievement(krs) {
   return Math.round(krs.reduce((s, k) => s + krAchievement(k), 0) / krs.length);
 }
 
-/* ===================== 지표 분석 - 연결한 구글 시트에서 지점/연도/월을 자유롭게 골라 비교 ===================== */
+/* ===================== 지표 분석 - 연결한 구글 시트 기반 다양한 분석 ===================== */
 function extractSheetId(url) {
   const m = String(url || "").match(/\/d\/([a-zA-Z0-9-_]+)/);
   return m ? m[1] : String(url || "").trim();
@@ -2182,6 +2182,79 @@ function aggregateMetric(parsed, metricName, yearLabel, monthLabels, mode) {
   const sum = vals.reduce((a, b) => a + b, 0);
   return mode === "sum" ? sum : sum / vals.length;
 }
+function prevYearLabel(yearLabel) {
+  const m = String(yearLabel || "").match(/(\d{4})/);
+  return m ? (parseInt(m[1], 10) - 1) + "년" : null;
+}
+// 연도×월을 시간순으로 쭉 이어붙인 타임라인을 만듭니다. (다음해 예고용 칸인 "27년 1월" 같은 건 제외)
+function buildTimeline(parsed, metricName) {
+  const stdMonths = (parsed.months || []).filter(m => /^\d{1,2}월$/.test(m));
+  const years = [...parsed.years].sort();
+  const points = [];
+  years.forEach(y => {
+    stdMonths.forEach(m => {
+      const v = parsed.metrics[metricName] && parsed.metrics[metricName][y] ? parsed.metrics[metricName][y][m] : null;
+      points.push({ label: `${y.replace("년", "")}.${m.replace("월", "")}`, year: y, month: m, value: v });
+    });
+  });
+  return points;
+}
+function meanOf(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
+function stddevOf(arr) {
+  const m = meanOf(arr);
+  return Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / arr.length);
+}
+function fmtMetricNum(n) {
+  return n === null || n === undefined ? "-" : (Math.abs(n) < 5 && Math.abs(n) > 0 ? n.toFixed(3) : n.toLocaleString(undefined, { maximumFractionDigits: 1 }));
+}
+function renderLineChartSVG(seriesList, opts) {
+  opts = opts || {};
+  const width = opts.width || 900, height = opts.height || 260;
+  const padL = 54, padR = 16, padT = 16, padB = 28;
+  const allVals = seriesList.flatMap(s => s.points.map(p => p.value)).filter(v => v !== null && v !== undefined);
+  if (!allVals.length) return `<div class="empty-state">표시할 데이터가 없습니다.</div>`;
+  const maxV = Math.max(...allVals);
+  const minV = Math.min(0, ...allVals);
+  const n = seriesList[0].points.length;
+  const xStep = (width - padL - padR) / Math.max(1, n - 1);
+  const range = (maxV - minV) || 1;
+  const yScale = (v) => height - padB - ((v - minV) / range) * (height - padT - padB);
+  const xScale = (i) => padL + i * xStep;
+
+  let svg = `<svg viewBox="0 0 ${width} ${height}" style="width:100%;height:auto;">`;
+  for (let i = 0; i <= 4; i++) {
+    const v = minV + (maxV - minV) * (i / 4);
+    const y = yScale(v);
+    svg += `<line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="#E5EDE0" stroke-width="1"/>`;
+    svg += `<text x="${padL - 8}" y="${y + 4}" font-size="10" fill="#8A9A82" text-anchor="end">${Math.round(v).toLocaleString()}</text>`;
+  }
+  seriesList.forEach(s => {
+    const ptStr = s.points.map((p, i) => p.value === null ? null : `${xScale(i)},${yScale(p.value)}`).filter(Boolean).join(" ");
+    svg += `<polyline points="${ptStr}" fill="none" stroke="${s.color}" stroke-width="2.5"/>`;
+    s.points.forEach((p, i) => { if (p.value !== null) svg += `<circle cx="${xScale(i)}" cy="${yScale(p.value)}" r="2.4" fill="${s.color}"><title>${escapeHtml(p.label)}: ${fmtMetricNum(p.value)}</title></circle>`; });
+  });
+  const labelEvery = Math.max(1, Math.ceil(n / 12));
+  seriesList[0].points.forEach((p, i) => {
+    if (i % labelEvery === 0) svg += `<text x="${xScale(i)}" y="${height - 8}" font-size="9" fill="#8A9A82" text-anchor="middle">${escapeHtml(p.label)}</text>`;
+  });
+  svg += `</svg>`;
+  if (seriesList.length > 1) {
+    svg = `<div style="display:flex;gap:14px;margin-bottom:6px;flex-wrap:wrap;">${seriesList.map(s => `<span style="display:flex;align-items:center;gap:5px;font-size:12px;"><span style="width:10px;height:10px;border-radius:2px;background:${s.color};display:inline-block;"></span>${escapeHtml(s.name)}</span>`).join("")}</div>` + svg;
+  }
+  return svg;
+}
+function renderSparklineSVG(points, color) {
+  const width = 130, height = 32;
+  const vals = points.map(p => p.value).filter(v => v !== null && v !== undefined);
+  if (!vals.length) return `<span style="font-size:11px;color:var(--text-muted);">데이터 없음</span>`;
+  const maxV = Math.max(...vals), minV = Math.min(...vals);
+  const range = (maxV - minV) || 1;
+  const n = points.length;
+  const xStep = width / Math.max(1, n - 1);
+  const yScale = (v) => height - 3 - ((v - minV) / range) * (height - 6);
+  const ptStr = points.map((p, i) => p.value === null ? null : `${i * xStep},${yScale(p.value)}`).filter(Boolean).join(" ");
+  return `<svg viewBox="0 0 ${width} ${height}" style="width:100%;height:${height}px;display:block;"><polyline points="${ptStr}" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
+}
 
 async function renderMetricAnalysis(section) {
   const main = document.getElementById("mainContent");
@@ -2203,16 +2276,48 @@ async function renderMetricAnalysis(section) {
         </div>
         <button class="btn" type="submit">저장</button>
       </form>
-      <p style="font-size:11px;color:var(--text-muted);margin:10px 0 0;">시트 안의 <strong>탭(지점)들을 자동으로 찾아서</strong> 아래 지점 선택란에 채워드려요. 각 탭은 A열=지표명, B열=연도, C열부터 1~12월 값 형식이어야 해요.</p>
+      <p style="font-size:11px;color:var(--text-muted);margin:10px 0 0;">시트 안의 <strong>탭(지점)들을 자동으로 찾아서</strong> 아래 선택란에 채워드려요. 각 탭은 A열=지표명, B열=연도, C열부터 1~12월 값 형식이어야 해요.</p>
     </div>` : ""}
     <div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button class="btn small" id="googleAuthBtnMetric" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
       <span id="metricLoadStatus" style="font-size:12px;color:var(--text-muted);"></span>
     </div>
-    <div id="metricModeToggle" style="display:none;gap:8px;margin-bottom:6px;">
-      <button class="btn small" id="modeTwoBtn" type="button">두 기준 비교</button>
-      <button class="btn small secondary" id="modeAllBtn" type="button">지표 하나로 전체 지점 비교</button>
+    <div id="metricModeToggle" style="display:none;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+      <button class="btn small" id="modeDashBtn" type="button">요약 대시보드</button>
+      <button class="btn small secondary" id="modeTrendBtn" type="button">시간 추이 그래프</button>
+      <button class="btn small secondary" id="modeTwoBtn" type="button">두 기준 비교</button>
+      <button class="btn small secondary" id="modeAllBtn" type="button">지표별 전체 지점 비교</button>
+      <button class="btn small secondary" id="modeYoyBtn" type="button">전년 대비 증감률(YoY)</button>
+      <button class="btn small secondary" id="modeRankBtn" type="button">지점 순위</button>
+      <button class="btn small secondary" id="modeAnomalyBtn" type="button">이상치 탐지</button>
     </div>
+
+    <div class="card" id="metricDashboardCard" style="display:none;">
+      <h2>요약 대시보드</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">고른 지점·시점 기준으로 모든 지표의 현재값·전월 대비·최근 12개월 추이를 한 화면에 보여드려요.</p>
+      <div class="grid-3" style="align-items:end;">
+        <div class="field" style="margin:0;"><label>지점</label><select id="dashBranch"></select></div>
+        <div class="field" style="margin:0;"><label>연도</label><select id="dashYear"></select></div>
+        <div class="field" style="margin:0;"><label>월</label><select id="dashMonth"></select></div>
+      </div>
+      <button class="btn" id="dashRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">보기</button>
+      <div id="metricDashboardWrap" style="margin-top:18px;"></div>
+    </div>
+
+    <div class="card" id="metricTrendCard" style="display:none;">
+      <h2>시간 추이 그래프</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지표 하나를 골라 2023년부터 지금까지 어떻게 변해왔는지 지점별로 겹쳐서 볼 수 있어요.</p>
+      <div class="grid-2" style="align-items:end;">
+        <div class="field" style="margin:0;"><label>지표</label><select id="trendMetric"></select></div>
+        <div class="field" style="margin:0;">
+          <label>지점 (여러 개 선택 가능)</label>
+          <div id="trendBranchHolder" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
+        </div>
+      </div>
+      <button class="btn" id="trendRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">그래프 보기</button>
+      <div id="metricTrendWrap" style="margin-top:18px;overflow-x:auto;"></div>
+    </div>
+
     <div class="card" id="metricCompareCard" style="display:none;">
       <h2>비교할 두 기준 선택</h2>
       <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지점을 다르게 고르면 지점끼리, 연도를 다르게 고르면 전년 동월 비교, 월을 1~3개 고르면 그 기간 합계/평균으로 비교돼요.</p>
@@ -2227,10 +2332,11 @@ async function renderMetricAnalysis(section) {
         <button class="btn" id="metricCompareBtn" type="button" style="width:auto;padding:10px 24px;margin-left:auto;">비교하기</button>
       </div>
     </div>
+
     <div class="card" id="metricAllCard" style="display:none;">
-      <h2>지표 하나로 5개 지점 전체 비교</h2>
+      <h2>지표 하나로 전체 지점 비교</h2>
       <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지표 하나와 시점(연도·월 1~3개)을 고르면, 그 시점 기준으로 모든 지점을 나란히 보여드려요.</p>
-      <div class="grid-3" style="align-items:end;gap:16px;">
+      <div class="grid-3" style="align-items:end;">
         <div class="field" style="margin:0;"><label>지표</label><select id="allMetricSelect"></select></div>
         <div class="field" style="margin:0;"><label>연도</label><select id="allYearSelect"></select></div>
         <div class="field" style="margin:0;">
@@ -2245,6 +2351,53 @@ async function renderMetricAnalysis(section) {
         <button class="btn" id="metricAllCompareBtn" type="button" style="width:auto;padding:10px 24px;margin-left:auto;">비교하기</button>
       </div>
     </div>
+
+    <div class="card" id="metricYoyCard" style="display:none;">
+      <h2>전년 대비 증감률 (전체 지표)</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지표를 하나하나 고를 필요 없이, 지점·연도·월만 고르면 모든 지표를 작년 같은 달과 한 번에 비교해요.</p>
+      <div class="grid-3" style="align-items:end;">
+        <div class="field" style="margin:0;"><label>지점</label><select id="yoyBranch"></select></div>
+        <div class="field" style="margin:0;"><label>연도 (올해)</label><select id="yoyYear"></select></div>
+        <div class="field" style="margin:0;"><label>월</label><select id="yoyMonth"></select></div>
+      </div>
+      <button class="btn" id="yoyRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">비교하기</button>
+    </div>
+
+    <div class="card" id="metricRankCard" style="display:none;">
+      <h2>지점별 종합 순위 (가중치 점수화)</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">순위에 반영할 지표를 체크하고, 가중치와 "높을수록/낮을수록 좋음"을 정해주세요. (이탈율처럼 낮은 게 좋은 지표는 꼭 "낮을수록 좋음"으로 바꿔주세요)</p>
+      <div class="grid-2" style="align-items:end;">
+        <div class="field" style="margin:0;"><label>연도</label><select id="rankYear"></select></div>
+        <div class="field" style="margin:0;">
+          <label>월 (1~3개)</label>
+          <div id="rankMonthsHolder" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:10px;">
+        <label style="font-size:12.5px;"><input type="radio" name="rankAggMode" value="avg" checked> 평균</label>
+        <label style="font-size:12.5px;"><input type="radio" name="rankAggMode" value="sum"> 합계</label>
+      </div>
+      <div id="rankMetricsHolder" style="margin-top:14px;"></div>
+      <button class="btn" id="rankRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">순위 계산하기</button>
+    </div>
+
+    <div class="card" id="metricAnomalyCard" style="display:none;">
+      <h2>이상치 탐지</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">2023년부터 지금까지의 흐름에서 평균과 크게 벗어난 달을 자동으로 찾아드려요.</p>
+      <div class="grid-3" style="align-items:end;">
+        <div class="field" style="margin:0;"><label>지점</label><select id="anomalyBranch"></select></div>
+        <div class="field" style="margin:0;"><label>지표</label><select id="anomalyMetric"></select></div>
+        <div class="field" style="margin:0;"><label>민감도</label>
+          <select id="anomalySensitivity">
+            <option value="2">둔감하게 (2표준편차 이상만)</option>
+            <option value="1.5" selected>보통 (1.5표준편차 이상)</option>
+            <option value="1">민감하게 (1표준편차 이상)</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn" id="anomalyRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">찾기</button>
+    </div>
+
     <div class="card" style="overflow:auto;"><div id="metricResultWrap"></div></div>`;
 
   if (isLeader) {
@@ -2287,12 +2440,35 @@ async function renderMetricAnalysis(section) {
     </div>`;
   }
 
-  async function initCompareUI(tabNames, firstParsed) {
-    const years = [...firstParsed.years].sort();
-    const months = firstParsed.months;
+  let tabNamesG = [], firstParsedG = null;
+
+  function setCompareMode(mode) {
+    const cards = { dash: "metricDashboardCard", trend: "metricTrendCard", two: "metricCompareCard", all: "metricAllCard", yoy: "metricYoyCard", rank: "metricRankCard", anomaly: "metricAnomalyCard" };
+    const btns = { dash: "modeDashBtn", trend: "modeTrendBtn", two: "modeTwoBtn", all: "modeAllBtn", yoy: "modeYoyBtn", rank: "modeRankBtn", anomaly: "modeAnomalyBtn" };
+    Object.keys(cards).forEach(k => {
+      document.getElementById(cards[k]).style.display = k === mode ? "block" : "none";
+      document.getElementById(btns[k]).className = k === mode ? "btn small" : "btn small secondary";
+    });
+    document.getElementById("metricResultWrap").innerHTML = "";
+  }
+  document.getElementById("modeDashBtn").onclick = () => setCompareMode("dash");
+  document.getElementById("modeTrendBtn").onclick = () => setCompareMode("trend");
+  document.getElementById("modeTwoBtn").onclick = () => setCompareMode("two");
+  document.getElementById("modeAllBtn").onclick = () => setCompareMode("all");
+  document.getElementById("modeYoyBtn").onclick = () => setCompareMode("yoy");
+  document.getElementById("modeRankBtn").onclick = () => setCompareMode("rank");
+  document.getElementById("modeAnomalyBtn").onclick = () => setCompareMode("anomaly");
+
+  async function initAllViews(tabNames, firstParsed, spreadsheetId) {
+    tabNamesG = tabNames; firstParsedG = firstParsed;
+    // 혹시 지표 형식이 아닌 탭이 섞여 있어도, 연도/월처럼 안 생긴 값은 걸러내서 선택란에 이상한 값이 안 뜨게 합니다.
+    const years = [...firstParsed.years].filter(y => /^\d{4}년$/.test(y)).sort();
+    const months = firstParsed.months.filter(m => /^\d{1,2}월$/.test(m) || /^\d{2}년\s*\d{1,2}월$/.test(m));
+    const stdMonths = months.filter(m => /^\d{1,2}월$/.test(m));
+
+    // 두 기준 비교
     document.getElementById("groupA-holder").innerHTML = groupSelectorHtml("gA", "기준 A", tabNames, years, months);
     document.getElementById("groupB-holder").innerHTML = groupSelectorHtml("gB", "기준 B", tabNames, years, months);
-    // 기본값: 최근 두 연도를 서로 다르게 미리 골라 놔서 전년 동월 비교가 바로 되게 합니다.
     if (years.length > 1) {
       document.getElementById("gAYear").value = years[years.length - 2];
       document.getElementById("gBYear").value = years[years.length - 1];
@@ -2302,7 +2478,7 @@ async function renderMetricAnalysis(section) {
       document.querySelector(`.gBMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
     }
 
-    // "지표 하나로 전체 지점 비교" 탭도 같이 채워둡니다.
+    // 지표별 전체 지점 비교
     document.getElementById("allMetricSelect").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
     document.getElementById("allYearSelect").innerHTML = years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
     document.getElementById("allYearSelect").value = years[years.length - 1];
@@ -2311,19 +2487,316 @@ async function renderMetricAnalysis(section) {
     </label>`).join("");
     if (months.length) document.querySelector(`.allMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
 
+    // 대시보드
+    document.getElementById("dashBranch").innerHTML = tabNames.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+    document.getElementById("dashYear").innerHTML = years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
+    document.getElementById("dashYear").value = years[years.length - 1];
+    document.getElementById("dashMonth").innerHTML = stdMonths.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+
+    // 추이 그래프
+    document.getElementById("trendMetric").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    document.getElementById("trendBranchHolder").innerHTML = tabNames.map((t, i) => `<label style="font-size:12px;display:flex;align-items:center;gap:4px;background:#F4FAEF;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;">
+      <input type="checkbox" class="trendBranchChk" value="${escapeHtml(t)}" ${i === 0 ? "checked" : ""}>${escapeHtml(t)}
+    </label>`).join("");
+
+    // YoY
+    document.getElementById("yoyBranch").innerHTML = tabNames.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+    document.getElementById("yoyYear").innerHTML = years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
+    document.getElementById("yoyYear").value = years[years.length - 1];
+    document.getElementById("yoyMonth").innerHTML = stdMonths.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+
+    // 순위
+    document.getElementById("rankYear").innerHTML = years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
+    document.getElementById("rankYear").value = years[years.length - 1];
+    document.getElementById("rankMonthsHolder").innerHTML = months.map(m => `<label style="font-size:12px;display:flex;align-items:center;gap:4px;background:#F4FAEF;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;">
+      <input type="checkbox" class="rankMonthChk" value="${escapeHtml(m)}">${escapeHtml(m)}
+    </label>`).join("");
+    if (months.length) document.querySelector(`.rankMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
+    document.getElementById("rankMetricsHolder").innerHTML = `<div style="display:grid;grid-template-columns:1fr 90px 150px;gap:8px 10px;align-items:center;max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:10px;">
+      ${firstParsed.metricOrder.map(m => `
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;"><input type="checkbox" class="rankMetricChk" value="${escapeHtml(m)}">${escapeHtml(m)}</label>
+        <input type="number" class="rankMetricWeight" data-metric="${escapeHtml(m)}" value="1" min="0" step="0.5">
+        <select class="rankMetricDir" data-metric="${escapeHtml(m)}"><option value="high">높을수록 좋음</option><option value="low">낮을수록 좋음</option></select>
+      `).join("")}
+    </div>`;
+
+    // 이상치
+    document.getElementById("anomalyBranch").innerHTML = `<option value="__all__">전체 지점</option>` + tabNames.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+    document.getElementById("anomalyMetric").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+
     document.getElementById("metricModeToggle").style.display = "flex";
-    document.getElementById("metricCompareCard").style.display = "block";
+    setCompareMode("dash");
+
+    // ---------- 대시보드 실행 ----------
+    document.getElementById("dashRunBtn").onclick = async () => {
+      const wrap = document.getElementById("metricDashboardWrap");
+      wrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
+      try {
+        const branch = document.getElementById("dashBranch").value;
+        const year = document.getElementById("dashYear").value;
+        const month = document.getElementById("dashMonth").value;
+        const parsed = await getParsedTab(spreadsheetId, branch);
+        const timelineKeys = years.flatMap(y => stdMonths.map(m => ({ year: y, month: m })));
+        const idx = timelineKeys.findIndex(k => k.year === year && k.month === month);
+        wrap.innerHTML = `<div class="stat-grid">${parsed.metricOrder.map(name => {
+          const full = buildTimeline(parsed, name);
+          const cur = idx >= 0 ? full[idx].value : null;
+          const prev = idx > 0 ? full[idx - 1].value : null;
+          const diff = (cur !== null && prev !== null) ? cur - prev : null;
+          const pct = (diff !== null && prev) ? (diff / Math.abs(prev)) * 100 : null;
+          const up = diff !== null && diff > 0, down = diff !== null && diff < 0;
+          const tone = up ? "var(--green-deep)" : down ? "var(--danger)" : "var(--text-muted)";
+          const arrow = up ? "▲" : down ? "▼" : "-";
+          const spark = idx >= 0 ? full.slice(Math.max(0, idx - 11), idx + 1) : full.slice(-12);
+          return `<div class="stat-card">
+            <div class="label">${escapeHtml(name)}</div>
+            <div class="value">${fmtMetricNum(cur)}</div>
+            <div class="mono" style="font-size:12px;color:${tone};font-weight:700;margin-top:2px;">${pct !== null ? `${arrow} ${Math.abs(pct).toFixed(1)}% (전월비)` : "전월 비교 불가"}</div>
+            <div style="margin-top:8px;">${renderSparklineSVG(spark, "#3B9BE8")}</div>
+          </div>`;
+        }).join("")}</div>`;
+      } catch (err) {
+        wrap.innerHTML = `<div class="empty-state">오류: ${escapeHtml(err.message)}</div>`;
+      }
+    };
+
+    // ---------- 추이 그래프 실행 ----------
+    document.getElementById("trendRunBtn").onclick = async () => {
+      const wrap = document.getElementById("metricTrendWrap");
+      wrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
+      try {
+        const metricName = document.getElementById("trendMetric").value;
+        const branches = [...document.querySelectorAll(".trendBranchChk:checked")].map(el => el.value);
+        if (!branches.length) { wrap.innerHTML = `<div class="empty-state">지점을 최소 1개 선택해주세요.</div>`; return; }
+        const palette = ["#2979FF", "#00C853", "#E03C3C", "#F5A623", "#8E1E5C", "#00B8D9"];
+        const parsedList = await Promise.all(branches.map(b => getParsedTab(spreadsheetId, b)));
+        const seriesList = branches.map((b, i) => ({ name: b, color: matchLocationColor(b) || palette[i % palette.length], points: buildTimeline(parsedList[i], metricName) }));
+        wrap.innerHTML = `<div style="min-width:700px;">${renderLineChartSVG(seriesList, { width: 900, height: 280 })}</div>`;
+      } catch (err) {
+        wrap.innerHTML = `<div class="empty-state">오류: ${escapeHtml(err.message)}</div>`;
+      }
+    };
+
+    // ---------- 두 기준 비교 실행 ----------
+    document.getElementById("metricCompareBtn").onclick = async () => {
+      const resultWrap = document.getElementById("metricResultWrap");
+      const monthsA = [...document.querySelectorAll(".gAMonthChk:checked")].map(el => el.value);
+      const monthsB = [...document.querySelectorAll(".gBMonthChk:checked")].map(el => el.value);
+      if (!monthsA.length || !monthsB.length) { resultWrap.innerHTML = `<div class="empty-state">양쪽 다 월을 최소 1개 선택해주세요.</div>`; return; }
+      if (monthsA.length > 3 || monthsB.length > 3) { resultWrap.innerHTML = `<div class="empty-state">월은 최대 3개까지 고를 수 있어요.</div>`; return; }
+      const mode = document.querySelector('input[name="metricAggMode"]:checked').value;
+      const branchA = document.getElementById("gABranch").value;
+      const branchB = document.getElementById("gBBranch").value;
+      const yearA = document.getElementById("gAYear").value;
+      const yearB = document.getElementById("gBYear").value;
+
+      resultWrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
+      try {
+        const [parsedA, parsedB] = await Promise.all([getParsedTab(spreadsheetId, branchA), getParsedTab(spreadsheetId, branchB)]);
+        const metricNames = [...new Set([...parsedA.metricOrder, ...parsedB.metricOrder])];
+        const labelA = `${branchA} · ${yearA} · ${monthsA.join("·")}`;
+        const labelB = `${branchB} · ${yearB} · ${monthsB.join("·")}`;
+        const results = metricNames.map(name => {
+          const valA = aggregateMetric(parsedA, name, yearA, monthsA, mode);
+          const valB = aggregateMetric(parsedB, name, yearB, monthsB, mode);
+          const diff = (valA !== null && valB !== null) ? valB - valA : null;
+          const pct = (diff !== null && valA) ? (diff / Math.abs(valA)) * 100 : null;
+          return { name, valA, valB, diff, pct };
+        });
+        resultWrap.innerHTML = renderDiffTable(["지표", labelA, labelB, "증감", "증감율"], results.map(r => [r.name, fmtMetricNum(r.valA), fmtMetricNum(r.valB), r.diff, r.pct]));
+      } catch (err) {
+        resultWrap.innerHTML = `<div class="empty-state">비교 중 오류: ${escapeHtml(err.message)}</div>`;
+      }
+    };
+
+    // ---------- 지표별 전체 지점 비교 실행 ----------
+    document.getElementById("metricAllCompareBtn").onclick = async () => {
+      const resultWrap = document.getElementById("metricResultWrap");
+      const metricName = document.getElementById("allMetricSelect").value;
+      const year = document.getElementById("allYearSelect").value;
+      const monthsSel = [...document.querySelectorAll(".allMonthChk:checked")].map(el => el.value);
+      if (!monthsSel.length) { resultWrap.innerHTML = `<div class="empty-state">월을 최소 1개 선택해주세요.</div>`; return; }
+      if (monthsSel.length > 3) { resultWrap.innerHTML = `<div class="empty-state">월은 최대 3개까지 고를 수 있어요.</div>`; return; }
+      const mode = document.querySelector('input[name="metricAllAggMode"]:checked').value;
+
+      resultWrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
+      try {
+        const parsedByBranch = {};
+        await Promise.all(tabNames.map(async t => { parsedByBranch[t] = await getParsedTab(spreadsheetId, t); }));
+        const results = tabNames.map(t => ({ branch: t, value: aggregateMetric(parsedByBranch[t], metricName, year, monthsSel, mode) }))
+          .sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
+        const maxAbs = Math.max(1, ...results.map(r => Math.abs(r.value ?? 0)));
+        const periodLabel = `${year} · ${monthsSel.join("·")} (${mode === "sum" ? "합계" : "평균"})`;
+        resultWrap.innerHTML = `<p style="font-size:12.5px;color:var(--text-muted);margin:0 0 12px;"><strong>${escapeHtml(metricName)}</strong> · ${escapeHtml(periodLabel)}</p>
+          <table><thead><tr><th>지점</th><th>값</th><th style="width:40%;"></th></tr></thead><tbody>
+          ${results.map(r => {
+            const barPct = r.value === null ? 0 : Math.max(2, Math.round((Math.abs(r.value) / maxAbs) * 100));
+            const barColor = matchLocationColor(r.branch) || "var(--blue-deep)";
+            return `<tr>
+              <td style="font-weight:700;">${escapeHtml(r.branch)}</td>
+              <td class="mono" style="font-weight:700;">${fmtMetricNum(r.value)}</td>
+              <td><div style="background:#EAF3E3;border-radius:6px;height:16px;overflow:hidden;"><div style="background:${barColor};height:100%;width:${barPct}%;"></div></div></td>
+            </tr>`;
+          }).join("")}
+        </tbody></table>`;
+      } catch (err) {
+        resultWrap.innerHTML = `<div class="empty-state">비교 중 오류: ${escapeHtml(err.message)}</div>`;
+      }
+    };
+
+    // ---------- YoY 실행 ----------
+    document.getElementById("yoyRunBtn").onclick = async () => {
+      const resultWrap = document.getElementById("metricResultWrap");
+      const branch = document.getElementById("yoyBranch").value;
+      const year = document.getElementById("yoyYear").value;
+      const month = document.getElementById("yoyMonth").value;
+      const prevYear = prevYearLabel(year);
+      resultWrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
+      try {
+        const parsed = await getParsedTab(spreadsheetId, branch);
+        if (!parsed.years.includes(prevYear)) {
+          resultWrap.innerHTML = `<div class="empty-state">${escapeHtml(prevYear || "작년")} 데이터가 시트에 없어서 비교할 수 없어요.</div>`;
+          return;
+        }
+        const results = parsed.metricOrder.map(name => {
+          const valA = aggregateMetric(parsed, name, prevYear, [month], "avg");
+          const valB = aggregateMetric(parsed, name, year, [month], "avg");
+          const diff = (valA !== null && valB !== null) ? valB - valA : null;
+          const pct = (diff !== null && valA) ? (diff / Math.abs(valA)) * 100 : null;
+          return [name, fmtMetricNum(valA), fmtMetricNum(valB), diff, pct];
+        });
+        resultWrap.innerHTML = `<p style="font-size:12.5px;color:var(--text-muted);margin:0 0 12px;"><strong>${escapeHtml(branch)}</strong> · ${escapeHtml(month)} 기준</p>` +
+          renderDiffTable(["지표", `${escapeHtml(prevYear)}`, `${escapeHtml(year)}`, "증감", "증감율"], results);
+      } catch (err) {
+        resultWrap.innerHTML = `<div class="empty-state">비교 중 오류: ${escapeHtml(err.message)}</div>`;
+      }
+    };
+
+    // ---------- 순위 계산 실행 ----------
+    document.getElementById("rankRunBtn").onclick = async () => {
+      const resultWrap = document.getElementById("metricResultWrap");
+      const year = document.getElementById("rankYear").value;
+      const monthsSel = [...document.querySelectorAll(".rankMonthChk:checked")].map(el => el.value);
+      const mode = document.querySelector('input[name="rankAggMode"]:checked').value;
+      const selectedMetrics = [...document.querySelectorAll(".rankMetricChk:checked")].map(el => el.value);
+      if (!monthsSel.length) { resultWrap.innerHTML = `<div class="empty-state">월을 최소 1개 선택해주세요.</div>`; return; }
+      if (!selectedMetrics.length) { resultWrap.innerHTML = `<div class="empty-state">순위에 반영할 지표를 최소 1개 체크해주세요.</div>`; return; }
+
+      resultWrap.innerHTML = `<div class="empty-state">계산 중...</div>`;
+      try {
+        const parsedByBranch = {};
+        await Promise.all(tabNamesG.filter(t => t !== "셀프팀").map(async t => { parsedByBranch[t] = await getParsedTab(spreadsheetId, t); }));
+        const branches = tabNamesG.filter(t => t !== "셀프팀");
+
+        const perMetric = {}; // metric -> branch -> raw value
+        selectedMetrics.forEach(m => {
+          perMetric[m] = {};
+          branches.forEach(b => { perMetric[m][b] = aggregateMetric(parsedByBranch[b], m, year, monthsSel, mode); });
+        });
+
+        const scores = {};
+        branches.forEach(b => { scores[b] = { total: 0, totalWeight: 0, detail: [] }; });
+
+        selectedMetrics.forEach(m => {
+          const weight = parseFloat(document.querySelector(`.rankMetricWeight[data-metric="${CSS.escape(m)}"]`).value) || 0;
+          const dir = document.querySelector(`.rankMetricDir[data-metric="${CSS.escape(m)}"]`).value;
+          const vals = branches.map(b => perMetric[m][b]).filter(v => v !== null);
+          if (!vals.length || weight <= 0) return;
+          const maxV = Math.max(...vals), minV = Math.min(...vals);
+          branches.forEach(b => {
+            const raw = perMetric[m][b];
+            if (raw === null) return;
+            let normalized = maxV === minV ? 100 : ((raw - minV) / (maxV - minV)) * 100;
+            if (dir === "low") normalized = 100 - normalized;
+            scores[b].total += normalized * weight;
+            scores[b].totalWeight += weight;
+            scores[b].detail.push(`${m} ${Math.round(normalized)}점`);
+          });
+        });
+
+        const ranked = branches.map(b => ({
+          branch: b,
+          score: scores[b].totalWeight ? scores[b].total / scores[b].totalWeight : null,
+          detail: scores[b].detail
+        })).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+
+        resultWrap.innerHTML = `<table><thead><tr><th>순위</th><th>지점</th><th>종합 점수</th><th>세부</th></tr></thead><tbody>
+          ${ranked.map((r, i) => `<tr>
+            <td class="mono" style="font-weight:800;">${i + 1}</td>
+            <td style="font-weight:700;">${escapeHtml(r.branch)}</td>
+            <td class="mono" style="font-weight:800;color:var(--blue-deep);">${r.score !== null ? r.score.toFixed(1) : "-"}</td>
+            <td style="font-size:11.5px;color:var(--text-muted);">${r.detail.map(escapeHtml).join(" · ")}</td>
+          </tr>`).join("")}
+        </tbody></table>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px;">각 지표는 지점 간 최고~최저를 0~100점으로 환산한 뒤 가중치를 곱해 평균낸 값이에요. "셀프팀"(본사 합계) 탭은 순위 비교에서 제외했어요.</p>`;
+      } catch (err) {
+        resultWrap.innerHTML = `<div class="empty-state">계산 중 오류: ${escapeHtml(err.message)}</div>`;
+      }
+    };
+
+    // ---------- 이상치 탐지 실행 ----------
+    document.getElementById("anomalyRunBtn").onclick = async () => {
+      const resultWrap = document.getElementById("metricResultWrap");
+      const branchSel = document.getElementById("anomalyBranch").value;
+      const metricName = document.getElementById("anomalyMetric").value;
+      const threshold = parseFloat(document.getElementById("anomalySensitivity").value);
+      const targetBranches = branchSel === "__all__" ? tabNamesG : [branchSel];
+
+      resultWrap.innerHTML = `<div class="empty-state">찾는 중...</div>`;
+      try {
+        const allFlags = [];
+        for (const b of targetBranches) {
+          const parsed = await getParsedTab(spreadsheetId, b);
+          const timeline = buildTimeline(parsed, metricName);
+          const vals = timeline.map(p => p.value).filter(v => v !== null);
+          if (vals.length < 4) continue;
+          const m = meanOf(vals);
+          const sd = stddevOf(vals);
+          if (!sd) continue;
+          timeline.forEach(p => {
+            if (p.value === null) return;
+            const z = (p.value - m) / sd;
+            if (Math.abs(z) >= threshold) allFlags.push({ branch: b, label: p.label, value: p.value, z, mean: m });
+          });
+        }
+        if (!allFlags.length) { resultWrap.innerHTML = `<div class="empty-state">선택한 기준으로는 눈에 띄는 이상치가 없어요.</div>`; return; }
+        allFlags.sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
+        resultWrap.innerHTML = `<table><thead><tr><th>지점</th><th>시점</th><th>값</th><th>평균</th><th>편차</th></tr></thead><tbody>
+          ${allFlags.map(f => {
+            const tone = f.z > 0 ? "var(--blue-deep)" : "var(--danger)";
+            return `<tr>
+              <td style="font-weight:700;">${escapeHtml(f.branch)}</td>
+              <td>${escapeHtml(f.label)}</td>
+              <td class="mono" style="font-weight:700;color:${tone};">${fmtMetricNum(f.value)}</td>
+              <td class="mono" style="color:var(--text-muted);">${fmtMetricNum(f.mean)}</td>
+              <td class="mono" style="font-weight:700;color:${tone};">${f.z > 0 ? "+" : ""}${f.z.toFixed(2)}σ</td>
+            </tr>`;
+          }).join("")}
+        </tbody></table>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px;">편차(σ)는 그 지표의 전체 기간 평균에서 표준편차 몇 배만큼 벗어났는지를 뜻해요. 파란색은 평균보다 높게, 빨간색은 낮게 튄 경우예요.</p>`;
+      } catch (err) {
+        resultWrap.innerHTML = `<div class="empty-state">탐지 중 오류: ${escapeHtml(err.message)}</div>`;
+      }
+    };
   }
 
-  function setCompareMode(mode) {
-    document.getElementById("metricCompareCard").style.display = mode === "two" ? "block" : "none";
-    document.getElementById("metricAllCard").style.display = mode === "all" ? "block" : "none";
-    document.getElementById("modeTwoBtn").className = mode === "two" ? "btn small" : "btn small secondary";
-    document.getElementById("modeAllBtn").className = mode === "all" ? "btn small" : "btn small secondary";
-    document.getElementById("metricResultWrap").innerHTML = "";
+  function renderDiffTable(headers, rows) {
+    return `<table><thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>
+      ${rows.map(r => {
+        const [name, valAtext, valBtext, diff, pct] = r;
+        const up = diff !== null && diff > 0, down = diff !== null && diff < 0;
+        const arrow = up ? "▲" : down ? "▼" : "-";
+        const tone = up ? "var(--green-deep)" : down ? "var(--danger)" : "var(--text-muted)";
+        return `<tr>
+          <td style="font-weight:700;">${escapeHtml(name)}</td>
+          <td>${valAtext}</td>
+          <td>${valBtext}</td>
+          <td class="mono" style="color:${tone};font-weight:700;">${diff !== null ? `${arrow} ${fmtMetricNum(Math.abs(diff))}` : "-"}</td>
+          <td class="mono" style="color:${tone};font-weight:700;">${pct !== null ? `${arrow} ${Math.abs(pct).toFixed(1)}%` : "-"}</td>
+        </tr>`;
+      }).join("")}
+    </tbody></table>`;
   }
-  document.getElementById("modeTwoBtn").onclick = () => setCompareMode("two");
-  document.getElementById("modeAllBtn").onclick = () => setCompareMode("all");
 
   document.getElementById("googleAuthBtnMetric").onclick = async () => {
     const btn = document.getElementById("googleAuthBtnMetric");
@@ -2337,102 +2810,15 @@ async function renderMetricAnalysis(section) {
       const spreadsheetId = extractSheetId(folder.sheetUrl);
       const tabNames = await fetchSheetTabNames(spreadsheetId);
       if (!tabNames.length) { statusEl.textContent = "시트에서 탭을 찾을 수 없어요."; return; }
-      const firstParsed = await getParsedTab(spreadsheetId, tabNames[0]);
-      await initCompareUI(tabNames, firstParsed);
-      setCompareMode("two");
+      // 탭 중에 지표 형식이 아닌 탭(참고용 시트 등)이 섞여 있을 수 있어서, 실제로 "연도" 형식 데이터가 있는 첫 탭을 기준으로 삼습니다.
+      let firstParsed = null;
+      for (const t of tabNames) {
+        const parsed = await getParsedTab(spreadsheetId, t);
+        if (parsed.years.some(y => /^\d{4}년$/.test(y)) && parsed.metricOrder.length) { firstParsed = parsed; break; }
+      }
+      if (!firstParsed) { statusEl.textContent = "지표 형식(A열=지표명, B열=연도)에 맞는 탭을 찾지 못했어요."; return; }
+      await initAllViews(tabNames, firstParsed, spreadsheetId);
       statusEl.textContent = `지점 ${tabNames.length}개, 지표 ${firstParsed.metricOrder.length}개를 찾았어요.`;
-
-      document.getElementById("metricCompareBtn").onclick = async () => {
-        const resultWrap = document.getElementById("metricResultWrap");
-        const monthsA = [...document.querySelectorAll(".gAMonthChk:checked")].map(el => el.value);
-        const monthsB = [...document.querySelectorAll(".gBMonthChk:checked")].map(el => el.value);
-        if (!monthsA.length || !monthsB.length) { resultWrap.innerHTML = `<div class="empty-state">양쪽 다 월을 최소 1개 선택해주세요.</div>`; return; }
-        if (monthsA.length > 3 || monthsB.length > 3) { resultWrap.innerHTML = `<div class="empty-state">월은 최대 3개까지 고를 수 있어요.</div>`; return; }
-        const mode = document.querySelector('input[name="metricAggMode"]:checked').value;
-        const branchA = document.getElementById("gABranch").value;
-        const branchB = document.getElementById("gBBranch").value;
-        const yearA = document.getElementById("gAYear").value;
-        const yearB = document.getElementById("gBYear").value;
-
-        resultWrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
-        try {
-          const spreadsheetId = extractSheetId(folder.sheetUrl);
-          const [parsedA, parsedB] = await Promise.all([getParsedTab(spreadsheetId, branchA), getParsedTab(spreadsheetId, branchB)]);
-          const metricNames = [...new Set([...parsedA.metricOrder, ...parsedB.metricOrder])];
-          const labelA = `${branchA} · ${yearA} · ${monthsA.join("·")}`;
-          const labelB = `${branchB} · ${yearB} · ${monthsB.join("·")}`;
-
-          const results = metricNames.map(name => {
-            const valA = aggregateMetric(parsedA, name, yearA, monthsA, mode);
-            const valB = aggregateMetric(parsedB, name, yearB, monthsB, mode);
-            const diff = (valA !== null && valB !== null) ? valB - valA : null;
-            const pct = (diff !== null && valA) ? (diff / Math.abs(valA)) * 100 : null;
-            return { name, valA, valB, diff, pct };
-          });
-
-          const fmt = (n) => n === null ? "-" : (Math.abs(n) < 5 ? n.toFixed(3) : n.toLocaleString(undefined, { maximumFractionDigits: 1 }));
-          resultWrap.innerHTML = `<table><thead><tr>
-              <th>지표</th><th>${escapeHtml(labelA)}</th><th>${escapeHtml(labelB)}</th><th>증감</th><th>증감율</th>
-            </tr></thead><tbody>
-            ${results.map(r => {
-              const up = r.diff !== null && r.diff > 0;
-              const down = r.diff !== null && r.diff < 0;
-              const arrow = up ? "▲" : down ? "▼" : "-";
-              const tone = up ? "var(--green-deep)" : down ? "var(--danger)" : "var(--text-muted)";
-              return `<tr>
-                <td style="font-weight:700;">${escapeHtml(r.name)}</td>
-                <td>${fmt(r.valA)}</td>
-                <td>${fmt(r.valB)}</td>
-                <td class="mono" style="color:${tone};font-weight:700;">${r.diff !== null ? `${arrow} ${fmt(Math.abs(r.diff))}` : "-"}</td>
-                <td class="mono" style="color:${tone};font-weight:700;">${r.pct !== null ? `${arrow} ${Math.abs(r.pct).toFixed(1)}%` : "-"}</td>
-              </tr>`;
-            }).join("")}
-          </tbody></table>`;
-        } catch (err) {
-          resultWrap.innerHTML = `<div class="empty-state">비교 중 오류: ${escapeHtml(err.message)}</div>`;
-        }
-      };
-
-      document.getElementById("metricAllCompareBtn").onclick = async () => {
-        const resultWrap = document.getElementById("metricResultWrap");
-        const metricName = document.getElementById("allMetricSelect").value;
-        const year = document.getElementById("allYearSelect").value;
-        const monthsSel = [...document.querySelectorAll(".allMonthChk:checked")].map(el => el.value);
-        if (!monthsSel.length) { resultWrap.innerHTML = `<div class="empty-state">월을 최소 1개 선택해주세요.</div>`; return; }
-        if (monthsSel.length > 3) { resultWrap.innerHTML = `<div class="empty-state">월은 최대 3개까지 고를 수 있어요.</div>`; return; }
-        const mode = document.querySelector('input[name="metricAllAggMode"]:checked').value;
-
-        resultWrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
-        try {
-          const spreadsheetId = extractSheetId(folder.sheetUrl);
-          const parsedByBranch = {};
-          await Promise.all(tabNames.map(async t => { parsedByBranch[t] = await getParsedTab(spreadsheetId, t); }));
-
-          const results = tabNames.map(t => ({
-            branch: t,
-            value: aggregateMetric(parsedByBranch[t], metricName, year, monthsSel, mode)
-          })).sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
-
-          const maxAbs = Math.max(1, ...results.map(r => Math.abs(r.value ?? 0)));
-          const fmt = (n) => n === null ? "-" : (Math.abs(n) < 5 ? n.toFixed(3) : n.toLocaleString(undefined, { maximumFractionDigits: 1 }));
-          const periodLabel = `${year} · ${monthsSel.join("·")} (${mode === "sum" ? "합계" : "평균"})`;
-
-          resultWrap.innerHTML = `<p style="font-size:12.5px;color:var(--text-muted);margin:0 0 12px;"><strong>${escapeHtml(metricName)}</strong> · ${escapeHtml(periodLabel)}</p>
-            <table><thead><tr><th>지점</th><th>값</th><th style="width:40%;"></th></tr></thead><tbody>
-            ${results.map(r => {
-              const barPct = r.value === null ? 0 : Math.max(2, Math.round((Math.abs(r.value) / maxAbs) * 100));
-              const barColor = matchLocationColor(r.branch) || "var(--blue-deep)";
-              return `<tr>
-                <td style="font-weight:700;">${escapeHtml(r.branch)}</td>
-                <td class="mono" style="font-weight:700;">${fmt(r.value)}</td>
-                <td><div style="background:#EAF3E3;border-radius:6px;height:16px;overflow:hidden;"><div style="background:${barColor};height:100%;width:${barPct}%;"></div></div></td>
-              </tr>`;
-            }).join("")}
-          </tbody></table>`;
-        } catch (err) {
-          resultWrap.innerHTML = `<div class="empty-state">비교 중 오류: ${escapeHtml(err.message)}</div>`;
-        }
-      };
     } catch (err) {
       statusEl.textContent = "불러오기 실패: " + err.message;
     } finally {
@@ -2444,7 +2830,6 @@ async function renderMetricAnalysis(section) {
     document.getElementById("metricLoadStatus").textContent = "위 '구글 계정으로 연결' 버튼을 눌러 로그인해주세요.";
   }
 }
-
 
 async function renderOkrFolder(section) {
   const main = document.getElementById("mainContent");
