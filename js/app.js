@@ -2217,7 +2217,7 @@ function fmtMetricNum(n) {
 function renderLineChartSVG(seriesList, opts) {
   opts = opts || {};
   const width = opts.width || 900, height = opts.height || 260;
-  const padL = 54, padR = 16, padT = 16, padB = 28;
+  const padL = 54, padR = 16, padT = 26, padB = 28;
   const allVals = seriesList.flatMap(s => s.points.map(p => p.value)).filter(v => v !== null && v !== undefined);
   if (!allVals.length) return `<div class="empty-state">표시할 데이터가 없습니다.</div>`;
   const maxV = Math.max(...allVals);
@@ -2238,7 +2238,12 @@ function renderLineChartSVG(seriesList, opts) {
   seriesList.forEach(s => {
     const ptStr = s.points.map((p, i) => p.value === null ? null : `${xScale(i)},${yScale(p.value)}`).filter(Boolean).join(" ");
     svg += `<polyline points="${ptStr}" fill="none" stroke="${s.color}" stroke-width="2.5"/>`;
-    s.points.forEach((p, i) => { if (p.value !== null) svg += `<circle cx="${xScale(i)}" cy="${yScale(p.value)}" r="2.4" fill="${s.color}"><title>${escapeHtml(p.label)}: ${fmtMetricNum(p.value)}</title></circle>`; });
+    s.points.forEach((p, i) => {
+      if (p.value === null) return;
+      const cx = xScale(i), cy = yScale(p.value);
+      svg += `<circle cx="${cx}" cy="${cy}" r="2.4" fill="${s.color}"><title>${escapeHtml(p.label)}: ${fmtMetricNum(p.value)}</title></circle>`;
+      svg += `<text x="${cx}" y="${cy - 7}" font-size="9" fill="${s.color}" text-anchor="middle">${escapeHtml(fmtMetricNum(p.value))}</text>`;
+    });
   });
   const labelEvery = Math.max(1, Math.ceil(n / 12));
   seriesList[0].points.forEach((p, i) => {
