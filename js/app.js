@@ -2190,11 +2190,18 @@ function prevYearLabel(yearLabel) {
 function buildTimeline(parsed, metricName) {
   const stdMonths = (parsed.months || []).filter(m => /^\d{1,2}월$/.test(m));
   const years = [...parsed.years].sort();
+  // 오늘 이후의 미래 달은 당연히 값이 없거나 0으로 비어있을 뿐이라, 데이터 없음으로 처리해서
+  // 추이 그래프·대시보드·이상치 탐지 어디서도 "미래에 0으로 뚝 떨어진 것"처럼 보이지 않게 합니다.
+  const now = new Date();
+  const curY = now.getFullYear(), curM = now.getMonth() + 1;
   const points = [];
   years.forEach(y => {
+    const yNum = parseInt(y, 10);
     stdMonths.forEach(m => {
-      const v = parsed.metrics[metricName] && parsed.metrics[metricName][y] ? parsed.metrics[metricName][y][m] : null;
-      points.push({ label: `${y.replace("년", "")}.${m.replace("월", "")}`, year: y, month: m, value: v });
+      const mNum = parseInt(m, 10);
+      const isFuture = yNum > curY || (yNum === curY && mNum > curM);
+      const raw = parsed.metrics[metricName] && parsed.metrics[metricName][y] ? parsed.metrics[metricName][y][m] : null;
+      points.push({ label: `${y.replace("년", "")}.${m.replace("월", "")}`, year: y, month: m, value: isFuture ? null : raw });
     });
   });
   return points;
