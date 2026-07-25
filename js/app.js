@@ -2265,7 +2265,14 @@ function renderSparklineSVG(points, color) {
   const xStep = width / Math.max(1, n - 1);
   const yScale = (v) => height - 3 - ((v - minV) / range) * (height - 6);
   const ptStr = points.map((p, i) => p.value === null ? null : `${i * xStep},${yScale(p.value)}`).filter(Boolean).join(" ");
-  return `<svg viewBox="0 0 ${width} ${height}" style="width:100%;height:${height}px;display:block;"><polyline points="${ptStr}" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
+  const dots = points.map((p, i) => {
+    if (p.value === null) return "";
+    // 투명하고 조금 큰 원을 점 위에 겹쳐서, 정확히 점을 안 짚어도 마우스만 가까이 가면 툴팁이 뜨게 합니다.
+    return `<circle cx="${i * xStep}" cy="${yScale(p.value)}" r="6" fill="transparent" stroke="none">
+      <title>${escapeHtml(p.label)}: ${fmtMetricNum(p.value)}</title>
+    </circle><circle cx="${i * xStep}" cy="${yScale(p.value)}" r="1.6" fill="${color}"/>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${width} ${height}" style="width:100%;height:${height}px;display:block;"><polyline points="${ptStr}" fill="none" stroke="${color}" stroke-width="2"/>${dots}</svg>`;
 }
 
 const GRADE_POINTS = { "S": 5, "A": 4, "B+": 3, "B-": 2, "C": 1, "F": 0 };
