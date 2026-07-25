@@ -2692,17 +2692,28 @@ async function renderMetricAnalysis(section) {
         await Promise.all(tabNames.map(async t => { parsedByBranch[t] = await getParsedTab(spreadsheetId, t); }));
         const results = tabNames.map(t => ({ branch: t, value: aggregateMetric(parsedByBranch[t], metricName, year, monthsSel, mode) }))
           .sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
-        const maxAbs = Math.max(1, ...results.map(r => Math.abs(r.value ?? 0)));
+        // 음수가 있을 수 있는 지표(당기순이익, 수익율 등)를 위해 0을 기준으로 양쪽으로 뻗는 막대로 그립니다.
+        const maxPos = Math.max(0, ...results.map(r => r.value ?? 0));
+        const maxNegAbs = Math.max(0, ...results.map(r => r.value !== null ? Math.max(0, -r.value) : 0));
+        const totalRange = Math.max(1, maxPos + maxNegAbs);
+        const zeroPct = (maxNegAbs / totalRange) * 100;
         const periodLabel = `${year} · ${monthsSel.join("·")} (${mode === "sum" ? "합계" : "평균"})`;
         resultWrap.innerHTML = `<p style="font-size:12.5px;color:var(--text-muted);margin:0 0 12px;"><strong>${escapeHtml(metricName)}</strong> · ${escapeHtml(periodLabel)}</p>
           <table><thead><tr><th>지점</th><th>값</th><th style="width:40%;"></th></tr></thead><tbody>
           ${results.map(r => {
-            const barPct = r.value === null ? 0 : Math.max(2, Math.round((Math.abs(r.value) / maxAbs) * 100));
             const barColor = matchLocationColor(r.branch) || "var(--blue-deep)";
+            let barInner = "";
+            if (r.value !== null) {
+              const widthPct = Math.max(1, (Math.abs(r.value) / totalRange) * 100);
+              const leftPct = r.value >= 0 ? zeroPct : zeroPct - widthPct;
+              barInner = `<div style="position:absolute;top:0;bottom:0;left:${leftPct}%;width:${widthPct}%;background:${barColor};border-radius:3px;"></div>`;
+            }
+            const zeroLine = (zeroPct > 0.5 && zeroPct < 99.5)
+              ? `<div style="position:absolute;top:0;bottom:0;left:${zeroPct}%;width:1px;background:#AEC2A0;"></div>` : "";
             return `<tr>
               <td style="font-weight:700;">${escapeHtml(r.branch)}</td>
               <td class="mono" style="font-weight:700;">${fmtMetricNum(r.value)}</td>
-              <td><div style="background:#EAF3E3;border-radius:6px;height:16px;overflow:hidden;"><div style="background:${barColor};height:100%;width:${barPct}%;"></div></div></td>
+              <td><div style="position:relative;background:#EAF3E3;border-radius:6px;height:16px;overflow:hidden;">${zeroLine}${barInner}</div></td>
             </tr>`;
           }).join("")}
         </tbody></table>`;
