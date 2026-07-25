@@ -2545,7 +2545,7 @@ async function renderMetricAnalysis(section) {
           const diff = (cur !== null && prev !== null) ? cur - prev : null;
           const pct = (diff !== null && prev) ? (diff / Math.abs(prev)) * 100 : null;
           const up = diff !== null && diff > 0, down = diff !== null && diff < 0;
-          const tone = up ? "var(--green-deep)" : down ? "var(--danger)" : "var(--text-muted)";
+          const tone = up ? "#E03C3C" : down ? "#2979FF" : "var(--text-muted)";
           const arrow = up ? "▲" : down ? "▼" : "-";
           const spark = idx >= 0 ? full.slice(Math.max(0, idx - 11), idx + 1) : full.slice(-12);
           return `<div class="stat-card">
@@ -2763,7 +2763,7 @@ async function renderMetricAnalysis(section) {
         allFlags.sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
         resultWrap.innerHTML = `<table><thead><tr><th>지점</th><th>시점</th><th>값</th><th>평균</th><th>편차</th></tr></thead><tbody>
           ${allFlags.map(f => {
-            const tone = f.z > 0 ? "var(--blue-deep)" : "var(--danger)";
+            const tone = f.z > 0 ? "#E03C3C" : "#2979FF";
             return `<tr>
               <td style="font-weight:700;">${escapeHtml(f.branch)}</td>
               <td>${escapeHtml(f.label)}</td>
@@ -2786,7 +2786,7 @@ async function renderMetricAnalysis(section) {
         const [name, valAtext, valBtext, diff, pct] = r;
         const up = diff !== null && diff > 0, down = diff !== null && diff < 0;
         const arrow = up ? "▲" : down ? "▼" : "-";
-        const tone = up ? "var(--green-deep)" : down ? "var(--danger)" : "var(--text-muted)";
+        const tone = up ? "#E03C3C" : down ? "#2979FF" : "var(--text-muted)";
         return `<tr>
           <td style="font-weight:700;">${escapeHtml(name)}</td>
           <td>${valAtext}</td>
@@ -2808,17 +2808,22 @@ async function renderMetricAnalysis(section) {
       await requestGoogleAuth();
       btn.textContent = "다시 연결";
       const spreadsheetId = extractSheetId(folder.sheetUrl);
-      const tabNames = await fetchSheetTabNames(spreadsheetId);
-      if (!tabNames.length) { statusEl.textContent = "시트에서 탭을 찾을 수 없어요."; return; }
-      // 탭 중에 지표 형식이 아닌 탭(참고용 시트 등)이 섞여 있을 수 있어서, 실제로 "연도" 형식 데이터가 있는 첫 탭을 기준으로 삼습니다.
+      const tabNamesRaw = await fetchSheetTabNames(spreadsheetId);
+      if (!tabNamesRaw.length) { statusEl.textContent = "시트에서 탭을 찾을 수 없어요."; return; }
+      // 지표 형식(A열=지표명, B열=연도)이 아닌 탭(예: 코드/참고용 시트)은 지점 목록에서 자동으로 빼드려요.
+      const tabNames = [];
       let firstParsed = null;
-      for (const t of tabNames) {
+      for (const t of tabNamesRaw) {
         const parsed = await getParsedTab(spreadsheetId, t);
-        if (parsed.years.some(y => /^\d{4}년$/.test(y)) && parsed.metricOrder.length) { firstParsed = parsed; break; }
+        if (parsed.years.some(y => /^\d{4}년$/.test(y)) && parsed.metricOrder.length) {
+          tabNames.push(t);
+          if (!firstParsed) firstParsed = parsed;
+        }
       }
       if (!firstParsed) { statusEl.textContent = "지표 형식(A열=지표명, B열=연도)에 맞는 탭을 찾지 못했어요."; return; }
       await initAllViews(tabNames, firstParsed, spreadsheetId);
-      statusEl.textContent = `지점 ${tabNames.length}개, 지표 ${firstParsed.metricOrder.length}개를 찾았어요.`;
+      const skipped = tabNamesRaw.length - tabNames.length;
+      statusEl.textContent = `지점 ${tabNames.length}개${skipped ? ` (지표 형식이 아닌 탭 ${skipped}개는 제외)` : ""}, 지표 ${firstParsed.metricOrder.length}개를 찾았어요.`;
     } catch (err) {
       statusEl.textContent = "불러오기 실패: " + err.message;
     } finally {
