@@ -2335,6 +2335,19 @@ function gradeForValue(thresholds, value) {
   return "F";
 }
 
+// 엑셀 파일에는 서식만 적용된 빈 줄/빈 칸이 수백~수천 개씩 딸려오는 경우가 많아서,
+// 실제 데이터가 있는 범위까지만 잘라내 Firestore에 저장할 용량을 크게 줄입니다.
+function trimSheetRows(rows) {
+  const isEmptyCell = (c) => c === "" || c === null || c === undefined;
+  while (rows.length && rows[rows.length - 1].every(isEmptyCell)) rows.pop();
+  let maxCols = 0;
+  rows.forEach(r => {
+    let lastNonEmpty = -1;
+    r.forEach((c, i) => { if (!isEmptyCell(c)) lastNonEmpty = i; });
+    maxCols = Math.max(maxCols, lastNonEmpty + 1);
+  });
+  return rows.map(r => r.slice(0, maxCols));
+}
 async function renderMetricAnalysis(section) {
   const main = document.getElementById("mainContent");
   const folder = state.customFolders.find(f => f.id === section.folderId);
@@ -2348,19 +2361,12 @@ async function renderMetricAnalysis(section) {
     </div>
     ${isLeader ? `
     <div class="card">
-      <h2>연결할 구글 시트 설정</h2>
-      <form id="metricSheetForm" class="grid-2" style="align-items:end;">
-        <div class="field" style="margin:0;"><label>구글 시트 URL</label>
-          <input type="text" id="metricSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/..." value="${escapeHtml(folder?.sheetUrl || "")}">
-        </div>
-        <button class="btn" type="submit">저장</button>
-      </form>
-      <p style="font-size:11px;color:var(--text-muted);margin:10px 0 0;">시트 안의 <strong>탭(지점)들을 자동으로 찾아서</strong> 아래 선택란에 채워드려요. 각 탭은 A열=지표명, B열=연도, C열부터 1~12월 값 형식이어야 해요.</p>
-    </div>` : ""}
-    <div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-      <button class="btn small" id="googleAuthBtnMetric" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
-      <span id="metricLoadStatus" style="font-size:12px;color:var(--text-muted);"></span>
-    </div>
+      <h2>엑셀 파일 업로드</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">엑셀 파일(.xlsx)을 올리면 그 안의 모든 탭을 한 번에 읽어서 저장해요. 나중에 데이터가 바뀌면 새 파일을 다시 올려서 덮어쓰시면 돼요 (구글 계정 연결 없이 바로 반영돼요).</p>
+      <input type="file" id="metricFileInput" accept=".xlsx,.xls">
+      <p id="metricUploadStatus" style="font-size:12px;color:var(--text-muted);margin-top:8px;">${folder?.sheetFileName ? `현재 연결된 파일: <strong>${escapeHtml(folder.sheetFileName)}</strong> (${escapeHtml((folder.sheetUpdatedAt || "").slice(0, 16).replace("T", " "))} 업로드)` : ""}</p>
+      <p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">각 탭은 A열=지표명, B열=연도, C열부터 1~12월 값 형식이어야 해요.</p>
+    </div>` : (!folder?.sheetFileName ? `<div class="card"><div class="empty-state">아직 팀장이 연결한 파일이 없습니다.</div></div>` : "")}
     <div id="metricModeToggle" style="display:none;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
       <button class="btn small" id="modeDashBtn" type="button">요약 대시보드</button>
       <button class="btn small secondary" id="modeTrendBtn" type="button">시간 추이 그래프</button>
@@ -2479,22 +2485,40 @@ async function renderMetricAnalysis(section) {
 
     <div class="card" style="overflow:auto;"><div id="metricResultWrap"></div></div>`;
 
+  let sheetData = null;
+  try { sheetData = folder?.sheetData ? JSON.parse(folder.sheetData) : null; } catch (err) { sheetData = null; }
+
   if (isLeader) {
-    document.getElementById("metricSheetForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const sheetUrl = document.getElementById("metricSheetUrl").value.trim();
-      if (!folder) return;
-      await updateDoc(doc(db, "customFolders", folder.id), { sheetUrl });
-      await loadCustomFolders();
-      showToast("저장되었습니다.");
-      renderSection(section.key);
+    document.getElementById("metricFileInput").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file || !folder) return;
+      const statusEl = document.getElementById("metricUploadStatus");
+      statusEl.textContent = "읽는 중...";
+      try {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const newSheetData = {};
+        wb.SheetNames.forEach(name => {
+          newSheetData[name] = trimSheetRows(XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: "", raw: false }));
+        });
+        await updateDoc(doc(db, "customFolders", folder.id), {
+          sheetData: JSON.stringify(newSheetData),
+          sheetFileName: file.name,
+          sheetUpdatedAt: new Date().toISOString()
+        });
+        await loadCustomFolders();
+        showToast("파일이 저장되었습니다.");
+        renderSection(section.key);
+      } catch (err) {
+        statusEl.textContent = "읽기 실패: " + err.message;
+      }
     });
   }
 
-  const tabCache = {}; // tabName -> parseMetricSheet 결과 (같은 탭 중복 요청 방지)
-  async function getParsedTab(spreadsheetId, tabName) {
+  const tabCache = {}; // tabName -> parseMetricSheet 결과 (같은 탭 반복 파싱 방지)
+  function getParsedTab(_unused, tabName) {
     if (tabCache[tabName]) return tabCache[tabName];
-    const rows = await fetchSheetValues(spreadsheetId, tabName);
+    const rows = (sheetData && sheetData[tabName]) || [];
     const parsed = parseMetricSheet(rows);
     tabCache[tabName] = parsed;
     return parsed;
@@ -2776,7 +2800,7 @@ async function renderMetricAnalysis(section) {
       resultWrap.innerHTML = `<div class="empty-state">계산 중...</div>`;
       try {
         if (!rubricCache) {
-          const rubricRows = await fetchSheetValues(spreadsheetId, "신호등");
+          const rubricRows = (sheetData && sheetData["신호등"]) || [];
           rubricCache = parseRubricSheet(rubricRows);
         }
         const parsedByBranch = {};
@@ -2887,42 +2911,28 @@ async function renderMetricAnalysis(section) {
     </tbody></table>`;
   }
 
-  document.getElementById("googleAuthBtnMetric").onclick = async () => {
-    const btn = document.getElementById("googleAuthBtnMetric");
-    const statusEl = document.getElementById("metricLoadStatus");
-    if (!folder || !folder.sheetUrl) { statusEl.textContent = isLeader ? "먼저 위에서 구글 시트를 연결해주세요." : "아직 연결된 시트가 없습니다. 팀장에게 문의하세요."; return; }
-    btn.disabled = true;
-    statusEl.textContent = "불러오는 중...";
-    try {
-      await requestGoogleAuth();
-      btn.textContent = "다시 연결";
-      const spreadsheetId = extractSheetId(folder.sheetUrl);
-      const tabNamesRaw = await fetchSheetTabNames(spreadsheetId);
-      if (!tabNamesRaw.length) { statusEl.textContent = "시트에서 탭을 찾을 수 없어요."; return; }
-      // 지표 형식(A열=지표명, B열=연도)이 아닌 탭(예: 코드/참고용 시트)은 지점 목록에서 자동으로 빼드려요.
-      const tabNames = [];
-      let firstParsed = null;
-      for (const t of tabNamesRaw) {
-        const parsed = await getParsedTab(spreadsheetId, t);
-        if (parsed.years.some(y => /^\d{4}년$/.test(y)) && parsed.metricOrder.length) {
-          tabNames.push(t);
-          if (!firstParsed) firstParsed = parsed;
-        }
-      }
-      if (!firstParsed) { statusEl.textContent = "지표 형식(A열=지표명, B열=연도)에 맞는 탭을 찾지 못했어요."; return; }
-      await initAllViews(tabNames, firstParsed, spreadsheetId);
-      const skipped = tabNamesRaw.length - tabNames.length;
-      statusEl.textContent = `지점 ${tabNames.length}개${skipped ? ` (지표 형식이 아닌 탭 ${skipped}개는 제외)` : ""}, 지표 ${firstParsed.metricOrder.length}개를 찾았어요.`;
-    } catch (err) {
-      statusEl.textContent = "불러오기 실패: " + err.message;
-    } finally {
-      btn.disabled = false;
-    }
-  };
-
-  if (!googleAccessToken) {
-    document.getElementById("metricLoadStatus").textContent = "위 '구글 계정으로 연결' 버튼을 눌러 로그인해주세요.";
+  if (!sheetData) {
+    const wrap = document.getElementById("metricResultWrap");
+    if (wrap) wrap.innerHTML = isLeader ? "" : `<div class="empty-state">아직 팀장이 연결한 파일이 없습니다.</div>`;
+    return;
   }
+
+  const allTabNames = Object.keys(sheetData);
+  // 지표 형식(A열=지표명, B열=연도)이 아닌 탭(예: 코드/참고용 시트)은 지점 목록에서 자동으로 빼드려요.
+  const tabNames = [];
+  let firstParsed = null;
+  allTabNames.forEach(t => {
+    const parsed = getParsedTab(null, t);
+    if (parsed.years.some(y => /^\d{4}년$/.test(y)) && parsed.metricOrder.length) {
+      tabNames.push(t);
+      if (!firstParsed) firstParsed = parsed;
+    }
+  });
+  if (!firstParsed) {
+    document.getElementById("metricResultWrap").innerHTML = `<div class="empty-state">지표 형식(A열=지표명, B열=연도)에 맞는 탭을 찾지 못했어요. 파일 형식을 확인해주세요.</div>`;
+    return;
+  }
+  await initAllViews(tabNames, firstParsed, null);
 }
 
 async function renderOkrFolder(section) {
