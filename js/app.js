@@ -2382,7 +2382,7 @@ async function renderMetricAnalysis(section) {
       <button class="btn small secondary" id="modeTwoBtn" type="button">두 기준 비교</button>
       <button class="btn small secondary" id="modeAllBtn" type="button">지표별 전체 지점 비교</button>
       <button class="btn small secondary" id="modeYoyBtn" type="button">전년 대비 증감률(YoY)</button>
-      <button class="btn small secondary" id="modeRankBtn" type="button">지점 순위</button>
+      ${canViewAllRole() ? `<button class="btn small secondary" id="modeRankBtn" type="button">지점 순위</button>` : ""}
       <button class="btn small secondary" id="modeAnomalyBtn" type="button">이상치 탐지</button>
     </div>
 
@@ -2558,8 +2558,11 @@ async function renderMetricAnalysis(section) {
     const cards = { dash: "metricDashboardCard", trend: "metricTrendCard", two: "metricCompareCard", all: "metricAllCard", yoy: "metricYoyCard", rank: "metricRankCard", anomaly: "metricAnomalyCard" };
     const btns = { dash: "modeDashBtn", trend: "modeTrendBtn", two: "modeTwoBtn", all: "modeAllBtn", yoy: "modeYoyBtn", rank: "modeRankBtn", anomaly: "modeAnomalyBtn" };
     Object.keys(cards).forEach(k => {
-      document.getElementById(cards[k]).style.display = k === mode ? "block" : "none";
-      document.getElementById(btns[k]).className = k === mode ? "btn small" : "btn small secondary";
+      const cardEl = document.getElementById(cards[k]);
+      const btnEl = document.getElementById(btns[k]);
+      if (!cardEl || !btnEl) return; // 지점 순위처럼 권한이 없어 버튼/카드 자체가 안 그려진 경우
+      cardEl.style.display = k === mode ? "block" : "none";
+      btnEl.className = k === mode ? "btn small" : "btn small secondary";
     });
     document.getElementById("metricResultWrap").innerHTML = "";
   }
@@ -2568,7 +2571,7 @@ async function renderMetricAnalysis(section) {
   document.getElementById("modeTwoBtn").onclick = () => setCompareMode("two");
   document.getElementById("modeAllBtn").onclick = () => setCompareMode("all");
   document.getElementById("modeYoyBtn").onclick = () => setCompareMode("yoy");
-  document.getElementById("modeRankBtn").onclick = () => setCompareMode("rank");
+  if (document.getElementById("modeRankBtn")) document.getElementById("modeRankBtn").onclick = () => setCompareMode("rank");
   document.getElementById("modeAnomalyBtn").onclick = () => setCompareMode("anomaly");
 
   async function initAllViews(tabNames, firstParsed, spreadsheetId) {
