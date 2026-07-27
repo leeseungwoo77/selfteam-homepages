@@ -1332,12 +1332,18 @@ async function renderMeetingGrid(section) {
   const rowMap = {};
   docs.forEach(d => {
     const key = d.title || "(제목 없음)";
-    if (!rowMap[key]) rowMap[key] = { title: key, latestDate: d.date || "", cells: {} };
+    if (!rowMap[key]) rowMap[key] = { title: key, latestDate: d.date || "", rowOrder: d.rowOrder, cells: {} };
     if ((d.date || "") > rowMap[key].latestDate) rowMap[key].latestDate = d.date || "";
+    if (d.rowOrder !== undefined && rowMap[key].rowOrder === undefined) rowMap[key].rowOrder = d.rowOrder;
     const cur = rowMap[key].cells[d.branchId];
     if (!cur || (d.date || "") > (cur.date || "")) rowMap[key].cells[d.branchId] = d;
   });
-  const rows = Object.values(rowMap).sort((a, b) => (b.latestDate || "").localeCompare(a.latestDate || ""));
+  const rows = Object.values(rowMap).sort((a, b) => {
+    const oa = a.rowOrder !== undefined ? a.rowOrder : Infinity;
+    const ob = b.rowOrder !== undefined ? b.rowOrder : Infinity;
+    if (oa !== ob) return oa - ob;
+    return (b.latestDate || "").localeCompare(a.latestDate || "");
+  });
 
   if (!rows.length) { wrap.innerHTML = `<div class="empty-state">등록된 미팅 기록이 없습니다.</div>`; return; }
 
@@ -1349,7 +1355,18 @@ async function renderMeetingGrid(section) {
   </tr></thead><tbody>`;
 
   rows.forEach((row, ri) => {
-    html += `<tr><td style="font-weight:800;font-size:15px;white-space:nowrap;vertical-align:top;">${escapeHtml(row.title)}</td>`;
+    const canEditRow = canWriteSection(section);
+    html += `<tr><td style="font-weight:800;font-size:15px;vertical-align:top;white-space:nowrap;">
+      <div style="display:flex;align-items:flex-start;gap:2px;">
+        <span>${escapeHtml(row.title)}</span>
+        ${canEditRow ? `
+          <button class="icon-btn" style="padding:0 3px;font-size:11px;" data-row-edit="${ri}" title="제목 수정">✎</button>
+          <span style="display:flex;flex-direction:column;">
+            <button class="icon-btn" style="padding:0;line-height:1.1;font-size:10px;" data-row-move="up" data-row-index="${ri}" ${ri === 0 ? "disabled" : ""}>▲</button>
+            <button class="icon-btn" style="padding:0;line-height:1.1;font-size:10px;" data-row-move="down" data-row-index="${ri}" ${ri === rows.length - 1 ? "disabled" : ""}>▼</button>
+          </span>` : ""}
+      </div>
+    </td>`;
     branchesSorted.forEach(b => {
       const cell = row.cells[b.id];
       if (cell) {
@@ -1384,6 +1401,63 @@ async function renderMeetingGrid(section) {
       const row = rows[parseInt(el.dataset.cellNewRow, 10)];
       openModal(section, null, { title: row.title, branchId: el.dataset.cellNewBranch });
     };
+  });
+  wrap.querySelectorAll("[data-row-edit]").forEach(el => {
+    el.onclick = (e) => {
+      e.stopPropagation();
+      openMeetingRowEditModal(section, rows[parseInt(el.dataset.rowEdit, 10)], docs);
+    };
+  });
+  wrap.querySelectorAll("[data-row-move]").forEach(el => {
+    el.onclick = (e) => {
+      e.stopPropagation();
+      moveMeetingRow(section, rows, docs, parseInt(el.dataset.rowIndex, 10), el.dataset.rowMove);
+    };
+  });
+}
+
+// "미팅" 줄(제목)을 눌러 이동할 때, 같은 제목으로 등록된 모든 지점의 글이 함께 순서가 매겨지도록
+// rowOrder 값을 그 제목의 모든 문서에 동일하게 적용합니다.
+async function moveMeetingRow(section, rows, docs, index, direction) {
+  const swapWith = direction === "up" ? index - 1 : index + 1;
+  if (swapWith < 0 || swapWith >= rows.length) return;
+  const reordered = [...rows];
+  [reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]];
+  const updates = [];
+  reordered.forEach((row, i) => {
+    docs.filter(d => (d.title || "(제목 없음)") === row.title).forEach(d => {
+      updates.push(updateDoc(doc(db, section.collectionName, d.id), { rowOrder: i }));
+    });
+  });
+  await Promise.all(updates);
+  renderSection(section.key);
+}
+
+function openMeetingRowEditModal(section, row, docs) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>미팅 제목 수정</h3>
+      <form id="rowEditForm">
+        <div class="field"><label>제목</label><input type="text" id="rowEditTitle" value="${escapeHtml(row.title)}" required></div>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:-8px;">이 제목으로 등록된 모든 지점의 미팅이 한꺼번에 이름이 바뀌어요.</p>
+        <div class="grid-2" style="margin-top:10px;">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="submit" class="btn">저장</button>
+        </div>
+      </form>
+    </div></div>`;
+  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  document.getElementById("rowEditForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const newTitle = document.getElementById("rowEditTitle").value.trim();
+    if (!newTitle || newTitle === row.title) { root.innerHTML = ""; return; }
+    const affected = docs.filter(d => (d.title || "(제목 없음)") === row.title);
+    await Promise.all(affected.map(d => updateDoc(doc(db, section.collectionName, d.id), { title: newTitle })));
+    root.innerHTML = "";
+    showToast("수정되었습니다.");
+    renderSection(section.key);
   });
 }
 
