@@ -355,20 +355,29 @@ async function renderMonthlySchedule(section) {
   const topScrollInner = document.getElementById("scheduleTopScrollInner");
   const scheduleTable = document.querySelector("#scheduleCalendar table");
   if (scrollCard && topScroll && topScrollInner && scheduleTable) {
-    topScrollInner.style.width = scheduleTable.scrollWidth + "px";
+    // 세로 스크롤바 유무 때문에 두 트랙의 실제 폭이 미세하게 달라질 수 있어서,
+    // 위쪽 스크롤바 폭을 아래쪽(세로 스크롤바를 뺀) 폭에 정확히 맞춥니다.
+    const syncWidths = () => {
+      topScrollInner.style.width = scheduleTable.scrollWidth + "px";
+      const scrollbarGutter = scrollCard.offsetWidth - scrollCard.clientWidth;
+      topScroll.style.paddingRight = scrollbarGutter + "px";
+    };
+    // 폰트/셀 크기가 자리 잡은 뒤에 폭을 재도록 한 프레임 뒤에 다시 계산합니다.
+    syncWidths();
+    requestAnimationFrame(syncWidths);
+    window.addEventListener("resize", syncWidths);
+
     let syncing = false;
-    topScroll.addEventListener("scroll", () => {
+    const syncByRatio = (from, to) => {
       if (syncing) return;
       syncing = true;
-      scrollCard.scrollLeft = topScroll.scrollLeft;
+      const fromMax = from.scrollWidth - from.clientWidth;
+      const toMax = to.scrollWidth - to.clientWidth;
+      to.scrollLeft = fromMax > 0 ? (from.scrollLeft / fromMax) * toMax : 0;
       syncing = false;
-    });
-    scrollCard.addEventListener("scroll", () => {
-      if (syncing) return;
-      syncing = true;
-      topScroll.scrollLeft = scrollCard.scrollLeft;
-      syncing = false;
-    });
+    };
+    topScroll.addEventListener("scroll", () => syncByRatio(topScroll, scrollCard));
+    scrollCard.addEventListener("scroll", () => syncByRatio(scrollCard, topScroll));
   }
 
   let activeCellInput = null;
