@@ -1592,8 +1592,6 @@ async function renderEvalSheet(section) {
         ${plUrl
           ? `<a href="${escapeHtml(plUrl)}" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">손익계산서</a>${state.profile.role === "leader" ? `<button class="icon-btn" id="editPlLinkBtn" type="button">수정</button>` : ""}`
           : (state.profile.role === "leader" ? `<button class="btn small secondary" id="editPlLinkBtn" type="button">+ 손익계산서 링크 설정</button>` : "")}
-        ${state.profile.role === "leader" ? `<a href="https://docs.google.com/spreadsheets/d/${EVAL_SPREADSHEET_ID}/edit" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;">원본 시트 열기</a>` : ""}
-        <button class="btn small" id="googleAuthBtn" type="button">${googleAccessToken ? "다시 연결" : "구글 계정으로 연결"}</button>
         <select id="evalYearSelect" style="padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:var(--font-display);font-weight:700;"></select>
       </div>
     </div>
@@ -1602,10 +1600,10 @@ async function renderEvalSheet(section) {
       <h2>연도 탭 등록/관리</h2>
       <form id="evalSheetAddForm" class="grid-3" style="align-items:end;">
         <div class="field" style="margin:0;"><label>표시 이름 (예: 2026년)</label><input type="text" id="newEvalLabel" required></div>
-        <div class="field" style="margin:0;"><label>구글 시트 탭 이름</label><input type="text" id="newEvalTab" placeholder="예: 평가지표_2026" required></div>
+        <div class="field" style="margin:0;"><label>엑셀 파일</label><input type="file" id="newEvalFile" accept=".xlsx,.xls" required></div>
         <button class="btn" type="submit">추가</button>
       </form>
-      <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">시트 아래쪽 탭에 표시된 이름을 그대로 입력하세요 (예: 평가지표_2026).</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">엑셀 파일을 올리면 그 파일의 첫 번째 탭을 그대로 표로 보여드려요. 나중에 데이터가 바뀌면 이 연도를 지우고 새 파일로 다시 등록해주세요.</p>
       <div id="evalSheetList" style="margin-top:14px;"></div>
     </div>` : ""}
     <div class="card" style="overflow:auto;max-height:calc(100vh - 210px);"><div id="evalSheetWrap">불러오는 중...</div></div>`;
@@ -1638,11 +1636,6 @@ async function renderEvalSheet(section) {
     };
   }
 
-  document.getElementById("googleAuthBtn").onclick = async () => {
-    try { await requestGoogleAuth(); showToast("구글 계정이 연결되었습니다."); renderSection(section.key); }
-    catch (err) { alert(err.message); }
-  };
-
   const snap = await getDocs(collection(db, "evalSheets"));
   const tabs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
 
@@ -1651,12 +1644,11 @@ async function renderEvalSheet(section) {
 
   if (!tabs.length) {
     yearSelect.innerHTML = `<option value="">등록된 연도가 없습니다</option>`;
-    wrap.innerHTML = `<div class="empty-state">등록된 연도가 없습니다. ${state.profile.role === "leader" ? "위에서 연도를 먼저 등록해주세요." : "팀장에게 문의해주세요."}</div>`;
+    wrap.innerHTML = `<div class="empty-state">등록된 연도가 없습니다. ${state.profile.role === "leader" ? "위에서 엑셀 파일을 먼저 올려주세요." : "팀장에게 문의해주세요."}</div>`;
   } else {
-    yearSelect.innerHTML = tabs.map(t => `<option value="${escapeHtml(t.tabName)}">${escapeHtml(t.label)}</option>`).join("");
-    yearSelect.onchange = () => loadEvalTab(yearSelect.value);
-    if (googleAccessToken) await loadEvalTab(tabs[tabs.length - 1].tabName);
-    else wrap.innerHTML = '오른쪽 위 "구글 계정으로 연결" 버튼을 눌러 상상플렉스 계정으로 로그인해주세요.';
+    yearSelect.innerHTML = tabs.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.label)}</option>`).join("");
+    yearSelect.onchange = () => loadEvalTab(tabs.find(t => t.id === yearSelect.value));
+    loadEvalTab(tabs[tabs.length - 1]);
   }
 
   if (state.profile.role === "leader") {
@@ -1664,11 +1656,25 @@ async function renderEvalSheet(section) {
     document.getElementById("evalSheetAddForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const label = document.getElementById("newEvalLabel").value.trim();
-      const tabName = document.getElementById("newEvalTab").value.trim();
-      if (!label || !tabName) return;
-      await addDoc(collection(db, "evalSheets"), { label, tabName, createdAt: new Date().toISOString() });
-      showToast("연도가 등록되었습니다.");
-      renderSection(section.key);
+      const fileInput = document.getElementById("newEvalFile");
+      const file = fileInput.files[0];
+      if (!label || !file) return;
+      const addBtn = e.target.querySelector('button[type="submit"]');
+      addBtn.disabled = true;
+      addBtn.textContent = "읽는 중...";
+      try {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const firstSheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = trimSheetRows(XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "", raw: false }));
+        await addDoc(collection(db, "evalSheets"), { label, rows: JSON.stringify(rows), fileName: file.name, createdAt: new Date().toISOString() });
+        showToast("연도가 등록되었습니다.");
+        renderSection(section.key);
+      } catch (err) {
+        alert("파일을 읽는 중 오류가 발생했습니다: " + err.message);
+        addBtn.disabled = false;
+        addBtn.textContent = "추가";
+      }
     });
   }
 }
@@ -1676,13 +1682,13 @@ async function renderEvalSheet(section) {
 function renderEvalSheetList(tabs) {
   const wrap = document.getElementById("evalSheetList");
   if (!tabs.length) { wrap.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">아직 등록된 연도가 없습니다.</p>`; return; }
-  wrap.innerHTML = `<table><thead><tr><th>표시 이름</th><th>탭 이름</th><th></th></tr></thead><tbody>
-    ${tabs.map(t => `<tr><td>${escapeHtml(t.label)}</td><td class="mono">${escapeHtml(t.tabName)}</td>
+  wrap.innerHTML = `<table><thead><tr><th>표시 이름</th><th>파일</th><th></th></tr></thead><tbody>
+    ${tabs.map(t => `<tr><td>${escapeHtml(t.label)}</td><td class="mono" style="font-size:12px;">${escapeHtml(t.fileName || "")}</td>
       <td class="actions"><button class="icon-btn danger" data-eid="${t.id}">삭제</button></td></tr>`).join("")}
   </tbody></table>`;
   wrap.querySelectorAll("[data-eid]").forEach(btn => {
     btn.onclick = async () => {
-      if (!confirm("이 연도 등록을 삭제할까요? (구글 시트 자체는 삭제되지 않습니다)")) return;
+      if (!confirm("이 연도 등록을 삭제할까요?")) return;
       await deleteDoc(doc(db, "evalSheets", btn.dataset.eid));
       showToast("삭제되었습니다.");
       renderSection(getSectionByKey("performance").key);
@@ -1690,15 +1696,14 @@ function renderEvalSheetList(tabs) {
   });
 }
 
-async function loadEvalTab(tabName) {
+function loadEvalTab(tab) {
   const wrap = document.getElementById("evalSheetWrap");
-  if (!tabName) { wrap.innerHTML = `<div class="empty-state">표시할 연도를 선택해주세요.</div>`; return; }
-  wrap.innerHTML = `<div class="empty-state"><div class="shape"></div>불러오는 중...</div>`;
+  if (!tab) { wrap.innerHTML = `<div class="empty-state">표시할 연도를 선택해주세요.</div>`; return; }
   try {
-    const rows = await fetchSheetValues(EVAL_SPREADSHEET_ID, tabName);
+    const rows = JSON.parse(tab.rows || "[]");
     renderPlainSheetTable(wrap, rows);
   } catch (err) {
-    wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}<br><span style="font-size:12px;">시트에 "${escapeHtml(tabName)}" 이름의 탭이 있는지 확인해주세요.</span></div>`;
+    wrap.innerHTML = `<div class="empty-state">파일 데이터를 읽을 수 없습니다: ${escapeHtml(err.message)}</div>`;
   }
 }
 
