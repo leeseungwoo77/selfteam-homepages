@@ -2459,7 +2459,7 @@ async function renderMetricAnalysis(section) {
       <button class="btn small" id="modeDashBtn" type="button">요약 대시보드</button>
       <button class="btn small secondary" id="modeTrendBtn" type="button">시간 추이 그래프</button>
       <button class="btn small secondary" id="modeTwoBtn" type="button">두 기준 비교</button>
-      <button class="btn small secondary" id="modeAllBtn" type="button">지표별 전체 지점 비교</button>
+      ${canViewAllRole() ? `<button class="btn small secondary" id="modeAllBtn" type="button">지표별 전체 지점 비교</button>` : ""}
       <button class="btn small secondary" id="modeYoyBtn" type="button">전년 대비 증감률(YoY)</button>
       ${canViewAllRole() ? `<button class="btn small secondary" id="modeRankBtn" type="button">지점 순위</button>` : ""}
       <button class="btn small secondary" id="modeAnomalyBtn" type="button">이상치 탐지</button>
@@ -2648,21 +2648,24 @@ async function renderMetricAnalysis(section) {
   document.getElementById("modeDashBtn").onclick = () => setCompareMode("dash");
   document.getElementById("modeTrendBtn").onclick = () => setCompareMode("trend");
   document.getElementById("modeTwoBtn").onclick = () => setCompareMode("two");
-  document.getElementById("modeAllBtn").onclick = () => setCompareMode("all");
+  if (document.getElementById("modeAllBtn")) document.getElementById("modeAllBtn").onclick = () => setCompareMode("all");
   document.getElementById("modeYoyBtn").onclick = () => setCompareMode("yoy");
   if (document.getElementById("modeRankBtn")) document.getElementById("modeRankBtn").onclick = () => setCompareMode("rank");
   document.getElementById("modeAnomalyBtn").onclick = () => setCompareMode("anomaly");
 
   async function initAllViews(tabNames, firstParsed, spreadsheetId) {
     tabNamesG = tabNames; firstParsedG = firstParsed;
+    // 지점 소속 팀원(원장님)은 자기 지점만 볼 수 있게, 이 지표 분석 안의 모든 "지점" 선택란을 제한합니다.
+    const restrictedBranch = canViewAllRole() ? null : (tabNames.includes(state.profile.branchName) ? state.profile.branchName : null);
+    const branchOptionsFor = (allTabs) => restrictedBranch ? allTabs.filter(t => t === restrictedBranch) : allTabs;
     // 혹시 지표 형식이 아닌 탭이 섞여 있어도, 연도/월처럼 안 생긴 값은 걸러내서 선택란에 이상한 값이 안 뜨게 합니다.
     const years = [...firstParsed.years].filter(y => /^\d{4}년$/.test(y)).sort();
     const months = firstParsed.months.filter(m => /^\d{1,2}월$/.test(m) || /^\d{2}년\s*\d{1,2}월$/.test(m));
     const stdMonths = months.filter(m => /^\d{1,2}월$/.test(m));
 
     // 두 기준 비교
-    document.getElementById("groupA-holder").innerHTML = groupSelectorHtml("gA", "기준 A", tabNames, years, months);
-    document.getElementById("groupB-holder").innerHTML = groupSelectorHtml("gB", "기준 B", tabNames, years, months);
+    document.getElementById("groupA-holder").innerHTML = groupSelectorHtml("gA", "기준 A", branchOptionsFor(tabNames), years, months);
+    document.getElementById("groupB-holder").innerHTML = groupSelectorHtml("gB", "기준 B", branchOptionsFor(tabNames), years, months);
     if (years.length > 1) {
       document.getElementById("gAYear").value = years[years.length - 2];
       document.getElementById("gBYear").value = years[years.length - 1];
@@ -2682,19 +2685,19 @@ async function renderMetricAnalysis(section) {
     if (months.length) document.querySelector(`.allMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
 
     // 대시보드
-    document.getElementById("dashBranch").innerHTML = tabNames.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+    document.getElementById("dashBranch").innerHTML = branchOptionsFor(tabNames).map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
     document.getElementById("dashYear").innerHTML = years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
     document.getElementById("dashYear").value = years[years.length - 1];
     document.getElementById("dashMonth").innerHTML = stdMonths.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
 
     // 추이 그래프
     document.getElementById("trendMetric").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
-    document.getElementById("trendBranchHolder").innerHTML = tabNames.map((t, i) => `<label style="font-size:12px;display:flex;align-items:center;gap:4px;background:#F4FAEF;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;">
+    document.getElementById("trendBranchHolder").innerHTML = branchOptionsFor(tabNames).map((t, i) => `<label style="font-size:12px;display:flex;align-items:center;gap:4px;background:#F4FAEF;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;">
       <input type="checkbox" class="trendBranchChk" value="${escapeHtml(t)}" ${i === 0 ? "checked" : ""}>${escapeHtml(t)}
     </label>`).join("");
 
     // YoY
-    document.getElementById("yoyBranch").innerHTML = tabNames.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+    document.getElementById("yoyBranch").innerHTML = branchOptionsFor(tabNames).map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
     document.getElementById("yoyYear").innerHTML = years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
     document.getElementById("yoyYear").value = years[years.length - 1];
     document.getElementById("yoyMonth").innerHTML = stdMonths.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
@@ -2715,7 +2718,7 @@ async function renderMetricAnalysis(section) {
     <p style="font-size:11px;color:var(--text-muted);margin:8px 0 0;">점수표(신호등 탭)에 기준이 있는 지표만 순위 계산에 쓸 수 있어요. 나머지 지표는 점수표가 없어서 자동으로 빠져요.</p>`;
 
     // 이상치
-    document.getElementById("anomalyBranch").innerHTML = `<option value="__all__">전체 지점</option>` + tabNames.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+    document.getElementById("anomalyBranch").innerHTML = (restrictedBranch ? "" : `<option value="__all__">전체 지점</option>`) + branchOptionsFor(tabNames).map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
     document.getElementById("anomalyMetric").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
 
     document.getElementById("metricModeToggle").style.display = "flex";
