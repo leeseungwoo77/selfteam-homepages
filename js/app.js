@@ -2815,9 +2815,10 @@ async function renderMetricAnalysis(section) {
 
       resultWrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
       try {
+        const branchTabs = tabNames.filter(t => t !== "셀프팀");
         const parsedByBranch = {};
-        await Promise.all(tabNames.map(async t => { parsedByBranch[t] = await getParsedTab(spreadsheetId, t); }));
-        const results = tabNames.map(t => ({ branch: t, value: aggregateMetric(parsedByBranch[t], metricName, year, monthsSel, mode) }))
+        await Promise.all(branchTabs.map(async t => { parsedByBranch[t] = await getParsedTab(spreadsheetId, t); }));
+        const results = branchTabs.map(t => ({ branch: t, value: aggregateMetric(parsedByBranch[t], metricName, year, monthsSel, mode) }))
           .sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
         // 음수가 있을 수 있는 지표(당기순이익, 수익율 등)를 위해 0을 기준으로 양쪽으로 뻗는 막대로 그립니다.
         const maxPos = Math.max(0, ...results.map(r => r.value ?? 0));
