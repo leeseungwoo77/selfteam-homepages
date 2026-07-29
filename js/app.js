@@ -313,7 +313,7 @@ async function renderMonthlySchedule(section) {
     return `<td style="${cellBase}${bgStyle}${extra}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
 
-  let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;table-layout:fixed;">
+  let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;table-layout:fixed;margin-right:16px;">
     <colgroup>
       <col style="width:90px;">
       ${dates.map(() => `<col style="width:100px;">`).join("")}
