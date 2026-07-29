@@ -262,7 +262,13 @@ async function renderMonthlySchedule(section) {
       <span id="activeCellHint" style="font-size:11px;color:var(--text-muted);">먼저 표에서 칸을 클릭한 뒤 색을 골라주세요.</span>
     </div>` : ""}
     <div id="scheduleTopScroll" style="overflow-x:auto;overflow-y:hidden;height:16px;margin-bottom:4px;"><div id="scheduleTopScrollInner" style="height:1px;"></div></div>
-    <div class="card" id="scheduleScrollCard" style="overflow:auto;max-height:calc(100vh - 190px);"><div id="scheduleCalendar">불러오는 중...</div></div>`;
+    <div style="display:flex;align-items:stretch;">
+      <div class="card" id="scheduleScrollCard" style="overflow:auto;max-height:calc(100vh - 190px);flex:1;min-width:0;margin-right:0;border-top-right-radius:0;border-bottom-right-radius:0;"><div id="scheduleCalendar">불러오는 중...</div></div>
+      <div class="card" id="scheduleRightPanelWrap" style="overflow:hidden;max-height:calc(100vh - 190px);width:92px;flex-shrink:0;padding:0;display:flex;flex-direction:column;border-top-left-radius:0;border-bottom-left-radius:0;border-left:none;">
+        <div style="background:#F4FAEF;font-weight:700;padding:8px 10px;font-size:12px;border-bottom:2px solid var(--border);flex-shrink:0;box-sizing:border-box;">날짜</div>
+        <div style="overflow:hidden;flex:1;"><div id="scheduleRightPanel"></div></div>
+      </div>
+    </div>`;
 
   document.getElementById("prevMonthBtn").onclick = () => {
     scheduleViewState.month--;
@@ -290,7 +296,7 @@ async function renderMonthlySchedule(section) {
 
   const cellBase = "white-space:nowrap;min-width:80px;max-width:160px;overflow:hidden;text-overflow:ellipsis;text-align:left;padding-left:6px;border-right:1px solid var(--border);";
   const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:5;white-space:nowrap;font-weight:700;padding:5px 8px;border-right:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;";
-  const rightLabelStyle = "position:sticky;right:0;background:#fff;z-index:5;white-space:nowrap;font-weight:700;padding:5px 8px;border-left:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;";
+  const rightLabelStyle = "background:#fff;white-space:nowrap;font-weight:700;padding:5px 8px;border-left:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;";
 
   function getCellValue(dateStr, rowKey) {
     const entry = byDate[dateStr];
@@ -317,7 +323,6 @@ async function renderMonthlySchedule(section) {
     <colgroup>
       <col style="width:90px;">
       ${dates.map(() => `<col style="width:100px;">`).join("")}
-      <col style="width:90px;">
     </colgroup>
     <thead>
     <tr>
@@ -327,14 +332,19 @@ async function renderMonthlySchedule(section) {
         const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
         return `<th data-date="${ymd(year, month, d)}" style="position:sticky;top:0;background:#F4FAEF;z-index:4;color:${wdColor};border-right:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;">${month}.${pad2(d)}(${wd})</th>`;
       }).join("")}
-      <th style="position:sticky;right:0;top:0;background:#F4FAEF;z-index:6;border-left:1px solid var(--border);">날짜</th>
     </tr>
   </thead><tbody>`;
+
+  // 오른쪽 패널(근무장소·지점·시간 라벨) - 가로 스크롤과 완전히 분리된 별도 표로 만들어서,
+  // 스크롤을 아무리 밀어도 항상 화면 오른쪽에 고정되어 보이게 합니다. (머리글은 별도 고정 요소로 처리)
+  let rightHtml = `<table class="table-compact" style="width:92px;border-collapse:separate;border-spacing:0;table-layout:fixed;">
+    <colgroup><col style="width:92px;"></colgroup><tbody>`;
 
   // 근무장소 행
   html += `<tr><td style="${leftLabelStyle}">근무장소</td>`;
   dates.forEach(d => { html += cellHtml(ymd(year, month, d), "location"); });
-  html += `<td style="${rightLabelStyle}">근무장소</td></tr>`;
+  html += `</tr>`;
+  rightHtml += `<tr><td style="${rightLabelStyle}">근무장소</td></tr>`;
 
   // 지점별 특이사항 행
   SCHEDULE_NOTE_ROWS.forEach(rowLabel => {
@@ -342,7 +352,8 @@ async function renderMonthlySchedule(section) {
     const rowTextColor = LOCATION_TEXT_COLORS[rowLabel] || "#fff";
     html += `<tr><td style="${leftLabelStyle}background:${rowColor};color:${rowTextColor};">${escapeHtml(rowLabel)}</td>`;
     dates.forEach(d => { html += cellHtml(ymd(year, month, d), "note_" + rowLabel); });
-    html += `<td style="${rightLabelStyle}background:${rowColor};color:${rowTextColor};">${escapeHtml(rowLabel)}</td></tr>`;
+    html += `</tr>`;
+    rightHtml += `<tr><td style="${rightLabelStyle}background:${rowColor};color:${rowTextColor};">${escapeHtml(rowLabel)}</td></tr>`;
   });
 
   // 30분 단위 시간표 행
@@ -350,27 +361,26 @@ async function renderMonthlySchedule(section) {
     const dividerStyle = si === 0 ? "border-top:3px solid var(--text-main);" : "";
     html += `<tr><td style="${leftLabelStyle}${dividerStyle}">${slot}</td>`;
     dates.forEach(d => { html += cellHtml(ymd(year, month, d), "time_" + slot, dividerStyle); });
-    html += `<td style="${rightLabelStyle}${dividerStyle}">${slot}</td></tr>`;
+    html += `</tr>`;
+    rightHtml += `<tr><td style="${rightLabelStyle}${dividerStyle}">${slot}</td></tr>`;
   });
 
   html += `</tbody></table>`;
+  rightHtml += `</tbody></table>`;
   document.getElementById("scheduleCalendar").innerHTML = html;
+  document.getElementById("scheduleRightPanel").innerHTML = rightHtml;
 
   // 표가 옆으로 길어서 스크롤바가 화면 맨 아래에만 있으면 찾기 불편하니, 표 위에도 스크롤바를 하나 더 만들어서 서로 맞물려 움직이게 합니다.
   const scrollCard = document.getElementById("scheduleScrollCard");
   const topScroll = document.getElementById("scheduleTopScroll");
   const topScrollInner = document.getElementById("scheduleTopScrollInner");
   const scheduleTable = document.querySelector("#scheduleCalendar table");
+  const rightPanel = document.getElementById("scheduleRightPanel");
   if (scrollCard && topScroll && topScrollInner && scheduleTable) {
     // 세로 스크롤바 유무 때문에 두 트랙의 실제 폭이 미세하게 달라질 수 있어서,
     // 위쪽 스크롤바 폭을 아래쪽(세로 스크롤바를 뺀) 폭에 정확히 맞춥니다.
     const syncWidths = () => {
-      // 오른쪽 고정 열의 실제 렌더링 폭만큼, 스크롤이 끝까지 밀렸을 때도 마지막 날짜 칸이
-      // 그 밑에 가려지지 않고 완전히 드러날 수 있도록 표 자체에 그만큼의 여유 공간(margin)을 붙입니다.
-      const rightStickyCell = scheduleTable.querySelector("tr:first-child th:last-child");
-      const rightStickyWidth = rightStickyCell ? rightStickyCell.getBoundingClientRect().width : 0;
-      scheduleTable.style.marginRight = rightStickyWidth + "px";
-      topScrollInner.style.width = scheduleTable.scrollWidth + rightStickyWidth + "px";
+      topScrollInner.style.width = scheduleTable.scrollWidth + "px";
       const scrollbarGutter = scrollCard.offsetWidth - scrollCard.clientWidth;
       topScroll.style.paddingRight = scrollbarGutter + "px";
     };
@@ -390,6 +400,14 @@ async function renderMonthlySchedule(section) {
     };
     topScroll.addEventListener("scroll", () => syncByRatio(topScroll, scrollCard));
     scrollCard.addEventListener("scroll", () => syncByRatio(scrollCard, topScroll));
+
+    // 오른쪽 근무장소·지점·시간 라벨 패널은 가로 스크롤과는 완전히 분리되어 있고(항상 고정),
+    // 세로로 스크롤할 때만 메인 표와 같이 움직이도록 위치를 맞춰줍니다.
+    if (rightPanel) {
+      scrollCard.addEventListener("scroll", () => {
+        rightPanel.style.transform = `translateY(${-scrollCard.scrollTop}px)`;
+      });
+    }
 
     // 이번 달을 보고 있을 때는, 오늘 날짜 칸이 (왼쪽에 고정된 라벨 열 바로 다음) 화면 맨 왼쪽에 오도록 자동으로 스크롤합니다.
     const today = new Date();
@@ -1319,7 +1337,7 @@ function openFolderEntryDetailModal(section, entry) {
     }).join("");
 
   root.innerHTML = `<div class="modal-bg" id="modalBg">
-    <div class="modal" style="max-width:640px;">
+    <div class="modal" style="max-width:1280px;">
       <h3>${escapeHtml(entry.title || "")}</h3>
       ${uploadDate ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">업로드: ${escapeHtml(uploadDate)}</div>` : ""}
       ${bodyHtml || `<p style="color:var(--text-muted);font-size:13px;">등록된 내용이 없습니다.</p>`}
