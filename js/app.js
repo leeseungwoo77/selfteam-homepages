@@ -313,7 +313,7 @@ async function renderMonthlySchedule(section) {
     return `<td style="${cellBase}${bgStyle}${extra}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
 
-  let html = `<table class="table-compact" style="width:max-content;"><thead>
+  let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;"><thead>
     <tr>
       <th style="position:sticky;left:0;top:0;background:#F4FAEF;z-index:3;border-right:1px solid var(--border);">날짜</th>
       ${dates.map(d => {
