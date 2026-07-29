@@ -28,9 +28,9 @@ const SECTIONS = [
       { key:"title", label:"제목", type:"text" },
       { key:"date", label:"날짜", type:"date" },
       { key:"attendees", label:"참석자", type:"text" },
-      { key:"agenda", label:"안건", type:"textarea" },
-      { key:"decisions", label:"결정사항", type:"textarea" },
-      { key:"followUp", label:"후속조치", type:"textarea" },
+      { key:"agenda", label:"안건", type:"richtext" },
+      { key:"decisions", label:"결정사항", type:"richtext" },
+      { key:"followUp", label:"후속조치", type:"richtext" },
       { key:"images", label:"회의 슬라이드 이미지", type:"imageUpload" }
     ], columns:["date","attendees","agenda"] },
 
