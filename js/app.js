@@ -288,9 +288,9 @@ async function renderMonthlySchedule(section) {
   const dates = [];
   for (let d = 1; d <= nDays; d++) dates.push(d);
 
-  const cellBase = "white-space:nowrap;min-width:80px;text-align:center;border-right:1px solid var(--border);";
-  const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;padding:5px 10px;border-right:1px solid var(--border);";
-  const rightLabelStyle = "position:sticky;right:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;padding:5px 10px;border-left:1px solid var(--border);";
+  const cellBase = "white-space:nowrap;min-width:80px;max-width:160px;overflow:hidden;text-overflow:ellipsis;text-align:center;border-right:1px solid var(--border);";
+  const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;padding:5px 10px;border-right:1px solid var(--border);transform:translateZ(0);";
+  const rightLabelStyle = "position:sticky;right:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;padding:5px 10px;border-left:1px solid var(--border);transform:translateZ(0);";
 
   function getCellValue(dateStr, rowKey) {
     const entry = byDate[dateStr];
@@ -315,13 +315,13 @@ async function renderMonthlySchedule(section) {
 
   let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;"><thead>
     <tr>
-      <th style="position:sticky;left:0;top:0;background:#F4FAEF;z-index:3;border-right:1px solid var(--border);">날짜</th>
+      <th style="position:sticky;left:0;top:0;background:#F4FAEF;z-index:3;border-right:1px solid var(--border);transform:translateZ(0);">날짜</th>
       ${dates.map(d => {
         const wd = weekdayLabel(year, month, d);
         const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
         return `<th data-date="${ymd(year, month, d)}" style="position:sticky;top:0;background:#F4FAEF;z-index:2;color:${wdColor};border-right:1px solid var(--border);">${month}.${pad2(d)}(${wd})</th>`;
       }).join("")}
-      <th style="position:sticky;right:0;top:0;background:#F4FAEF;z-index:3;border-left:1px solid var(--border);">날짜</th>
+      <th style="position:sticky;right:0;top:0;background:#F4FAEF;z-index:3;border-left:1px solid var(--border);transform:translateZ(0);">날짜</th>
     </tr>
   </thead><tbody>`;
 
