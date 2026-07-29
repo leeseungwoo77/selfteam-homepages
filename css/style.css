@@ -42,7 +42,7 @@ a { color: inherit; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--blue-deep) 0%, var(--blue-bright) 32%, var(--green-bright) 60%, var(--green-deep) 78%, var(--magenta-bright) 100%);
+  background: linear-gradient(135deg, var(--blue-deep) 0%, var(--blue-bright) 30%, var(--green-bright) 36%, var(--green-deep) 63%, var(--magenta-deep) 69%, var(--magenta-bright) 100%);
   padding: 24px;
 }
 
