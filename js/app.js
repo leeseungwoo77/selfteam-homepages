@@ -825,7 +825,10 @@ function buildNav() {
     .filter(s => !s.hidden)
     .filter(s => !s.leaderOnly || canViewAllRole());
   const allFolders = state.customFolders.map(f => withOverride(folderToSection(f))).filter(s => !s.leaderOnly || canViewAllRole());
-  const allItems = [...allBuiltIn, ...allFolders];
+  // "본사" 지점 소속 팀원(이사님 제외)은 아래 메뉴만 보이게 합니다.
+  const isHqStaff = state.profile.role === "member" && state.profile.branchName === "본사";
+  const HQ_STAFF_ALLOWED_LABELS = ["팀장 일정", "팀 회의", "전체 회의", "본사 회의", "지표 분석", "지점 운영 자료", "리더십 자료", "팀 스터디 자료", "지점 인적 구성"];
+  const allItems = [...allBuiltIn, ...allFolders].filter(s => !isHqStaff || HQ_STAFF_ALLOWED_LABELS.includes(s.label));
   GROUP_ORDER.forEach(group => {
     const items = allItems.filter(s => s.group === group).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     html += `<div class="nav-group"><div class="nav-group-label">${group}</div>`;
