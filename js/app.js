@@ -28,8 +28,7 @@ const SECTIONS = [
       { key:"title", label:"제목", type:"text" },
       { key:"date", label:"날짜", type:"date" },
       { key:"attendees", label:"참석자", type:"text" },
-      { key:"agenda", label:"안건", type:"richtext" },
-      { key:"decisions", label:"결정사항", type:"richtext" },
+      { key:"agenda", label:"안건", type:"richtext", tall:true },
       { key:"followUp", label:"후속조치", type:"richtext" },
       { key:"images", label:"회의 슬라이드 이미지", type:"imageUpload" }
     ], columns:["date","attendees","agenda"] },
@@ -3519,10 +3518,11 @@ function openModal(section, existing, prefill) {
     }
     if (f.type === "richtext") {
       const initial = sanitizeRichHtml(existing ? existing[f.key] : "");
+      const heightStyle = f.tall ? "min-height:480px;" : "";
       return `<div class="field">
         <label>${f.label}</label>
         ${richtextToolbarHtml(f.key)}
-        <div class="richtext-edit has-toolbar" id="f_${f.key}" contenteditable="true">${initial}</div>
+        <div class="richtext-edit has-toolbar" id="f_${f.key}" contenteditable="true" style="${heightStyle}">${initial}</div>
         <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">위 도구모음으로 글자 굵기·색·크기를 바꿀 수 있고, Tiro 등에서 복사한 내용을 표까지 그대로 붙여넣기(Ctrl+V) 하실 수 있어요.</p>
       </div>`;
     }
