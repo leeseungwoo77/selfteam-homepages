@@ -3516,7 +3516,7 @@ function openModal(section, existing, prefill) {
   }).join("");
 
   root.innerHTML = `<div class="modal-bg" id="modalBg">
-    <div class="modal">
+    <div class="modal" style="max-width:1440px;">
       <h3>${existing ? "수정" : "새로 등록"} · ${section.label}</h3>
       <form id="entryForm">${fieldsHtml}
         <div class="grid-2" style="margin-top:10px;">
