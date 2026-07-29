@@ -288,9 +288,9 @@ async function renderMonthlySchedule(section) {
   const dates = [];
   for (let d = 1; d <= nDays; d++) dates.push(d);
 
-  const cellBase = "white-space:nowrap;min-width:80px;max-width:160px;overflow:hidden;text-overflow:ellipsis;text-align:center;border-right:1px solid var(--border);";
-  const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;padding:5px 8px;border-right:1px solid var(--border);transform:translateZ(0);overflow:hidden;text-overflow:ellipsis;";
-  const rightLabelStyle = "position:sticky;right:0;background:#fff;z-index:1;white-space:nowrap;font-weight:700;padding:5px 8px;border-left:1px solid var(--border);transform:translateZ(0);overflow:hidden;text-overflow:ellipsis;";
+  const cellBase = "white-space:nowrap;min-width:80px;max-width:160px;overflow:hidden;text-overflow:ellipsis;text-align:left;padding-left:6px;border-right:1px solid var(--border);";
+  const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:5;white-space:nowrap;font-weight:700;padding:5px 8px;border-right:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;";
+  const rightLabelStyle = "position:sticky;right:0;background:#fff;z-index:5;white-space:nowrap;font-weight:700;padding:5px 8px;border-left:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;";
 
   function getCellValue(dateStr, rowKey) {
     const entry = byDate[dateStr];
@@ -308,7 +308,7 @@ async function renderMonthlySchedule(section) {
     if (canEdit) {
       return `<td style="${cellBase}${bgStyle}${extra}padding:0;border-radius:4px;">
         <input type="text" class="sched-cell" data-date="${dateStr}" data-row="${rowKey}" value="${escapeHtml(cell.text)}"
-          style="width:80px;max-width:100%;box-sizing:border-box;border:none;background:transparent;color:inherit;font-weight:inherit;text-align:center;outline:none;padding:0;font-family:inherit;font-size:inherit;" size="1"></td>`;
+          style="display:block;width:100%;max-width:100%;box-sizing:border-box;border:none;background:transparent;color:inherit;font-weight:inherit;text-align:left;padding:0 0 0 6px;outline:none;font-family:inherit;font-size:inherit;overflow:hidden;text-overflow:ellipsis;"></td>`;
     }
     return `<td style="${cellBase}${bgStyle}${extra}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
@@ -316,18 +316,18 @@ async function renderMonthlySchedule(section) {
   let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;table-layout:fixed;">
     <colgroup>
       <col style="width:90px;">
-      ${dates.map(() => `<col style="width:82px;">`).join("")}
+      ${dates.map(() => `<col style="width:100px;">`).join("")}
       <col style="width:90px;">
     </colgroup>
     <thead>
     <tr>
-      <th style="position:sticky;left:0;top:0;background:#F4FAEF;z-index:3;border-right:1px solid var(--border);transform:translateZ(0);">날짜</th>
+      <th style="position:sticky;left:0;top:0;background:#F4FAEF;z-index:6;border-right:1px solid var(--border);">날짜</th>
       ${dates.map(d => {
         const wd = weekdayLabel(year, month, d);
         const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
-        return `<th data-date="${ymd(year, month, d)}" style="position:sticky;top:0;background:#F4FAEF;z-index:2;color:${wdColor};border-right:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;">${month}.${pad2(d)}(${wd})</th>`;
+        return `<th data-date="${ymd(year, month, d)}" style="position:sticky;top:0;background:#F4FAEF;z-index:4;color:${wdColor};border-right:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;">${month}.${pad2(d)}(${wd})</th>`;
       }).join("")}
-      <th style="position:sticky;right:0;top:0;background:#F4FAEF;z-index:3;border-left:1px solid var(--border);transform:translateZ(0);">날짜</th>
+      <th style="position:sticky;right:0;top:0;background:#F4FAEF;z-index:6;border-left:1px solid var(--border);">날짜</th>
     </tr>
   </thead><tbody>`;
 
