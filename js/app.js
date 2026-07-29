@@ -313,7 +313,7 @@ async function renderMonthlySchedule(section) {
     return `<td style="${cellBase}${bgStyle}${extra}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
 
-  let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;table-layout:fixed;margin-right:16px;">
+  let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;table-layout:fixed;">
     <colgroup>
       <col style="width:90px;">
       ${dates.map(() => `<col style="width:100px;">`).join("")}
@@ -365,7 +365,12 @@ async function renderMonthlySchedule(section) {
     // 세로 스크롤바 유무 때문에 두 트랙의 실제 폭이 미세하게 달라질 수 있어서,
     // 위쪽 스크롤바 폭을 아래쪽(세로 스크롤바를 뺀) 폭에 정확히 맞춥니다.
     const syncWidths = () => {
-      topScrollInner.style.width = scheduleTable.scrollWidth + "px";
+      // 오른쪽 고정 열의 실제 렌더링 폭만큼, 스크롤이 끝까지 밀렸을 때도 마지막 날짜 칸이
+      // 그 밑에 가려지지 않고 완전히 드러날 수 있도록 표 자체에 그만큼의 여유 공간(margin)을 붙입니다.
+      const rightStickyCell = scheduleTable.querySelector("tr:first-child th:last-child");
+      const rightStickyWidth = rightStickyCell ? rightStickyCell.getBoundingClientRect().width : 0;
+      scheduleTable.style.marginRight = rightStickyWidth + "px";
+      topScrollInner.style.width = scheduleTable.scrollWidth + rightStickyWidth + "px";
       const scrollbarGutter = scrollCard.offsetWidth - scrollCard.clientWidth;
       topScroll.style.paddingRight = scrollbarGutter + "px";
     };
