@@ -605,7 +605,9 @@ onAuthStateChanged(auth, async (user) => {
 
   document.getElementById("whoBox").innerHTML = `
     <div class="name">${escapeHtml(state.profile.name || user.email)}</div>
-    <div class="role">${state.profile.role === "leader" ? "팀장" : state.profile.role === "viewer" ? "전체 열람 (뷰어)" : "팀원 · " + escapeHtml(state.profile.branchName || "")}</div>`;
+    <div class="role">${state.profile.role === "leader" ? "팀장" : state.profile.role === "viewer" ? "전체 열람 (뷰어)" : "팀원 · " + escapeHtml(state.profile.branchName || "")}</div>
+    <div style="margin-top:8px;"><a href="#" id="whoBoxOpsShortcut" style="font-size:11.5px;color:#DCEFD3;text-decoration:underline;">지점 운영 자료 바로가기 ›</a></div>`;
+  document.getElementById("whoBoxOpsShortcut").onclick = (e) => { e.preventDefault(); goToSection("operation"); };
 
   await loadBranches();
   await loadCustomFolders();
