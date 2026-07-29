@@ -319,7 +319,7 @@ async function renderMonthlySchedule(section) {
       ${dates.map(d => {
         const wd = weekdayLabel(year, month, d);
         const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
-        return `<th style="position:sticky;top:0;background:#F4FAEF;z-index:2;color:${wdColor};border-right:1px solid var(--border);">${month}.${pad2(d)}(${wd})</th>`;
+        return `<th data-date="${ymd(year, month, d)}" style="position:sticky;top:0;background:#F4FAEF;z-index:2;color:${wdColor};border-right:1px solid var(--border);">${month}.${pad2(d)}(${wd})</th>`;
       }).join("")}
     </tr>
   </thead><tbody>`;
@@ -378,6 +378,21 @@ async function renderMonthlySchedule(section) {
     };
     topScroll.addEventListener("scroll", () => syncByRatio(topScroll, scrollCard));
     scrollCard.addEventListener("scroll", () => syncByRatio(scrollCard, topScroll));
+
+    // 이번 달을 보고 있을 때는, 오늘 날짜 칸이 (왼쪽에 고정된 라벨 열 바로 다음) 화면 맨 왼쪽에 오도록 자동으로 스크롤합니다.
+    const today = new Date();
+    if (year === today.getFullYear() && month === today.getMonth() + 1) {
+      const scrollToToday = () => {
+        const todayStr = ymd(year, month, today.getDate());
+        const todayTh = scheduleTable.querySelector(`th[data-date="${todayStr}"]`);
+        const firstTh = scheduleTable.querySelector("th");
+        if (!todayTh || !firstTh) return;
+        const target = Math.max(0, todayTh.offsetLeft - firstTh.offsetWidth);
+        scrollCard.scrollLeft = target;
+        syncByRatio(scrollCard, topScroll);
+      };
+      requestAnimationFrame(scrollToToday);
+    }
   }
 
   let activeCellInput = null;
