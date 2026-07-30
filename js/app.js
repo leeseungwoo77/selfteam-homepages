@@ -2478,6 +2478,7 @@ async function renderMetricAnalysis(section) {
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
         <p>${section.desc}</p>
       </div>
+      <a href="https://docs.google.com/spreadsheets/d/10KwiAbBdzcP88BKHL2dzFzTN3yzPXuKTSxQRkPct9zo/edit?gid=1236409240#gid=1236409240" target="_blank" rel="noopener" class="btn small secondary" style="text-decoration:none;display:inline-flex;align-items:center;white-space:nowrap;">원본 파일 열기 ↗</a>
     </div>
     ${isLeader ? `
     <div class="card">
