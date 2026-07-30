@@ -318,11 +318,10 @@ async function renderMonthlySchedule(section) {
     return `<td style="${cellBase}${bgStyle}${extra}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
 
-  let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;table-layout:fixed;margin-right:100px;">
+  let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;table-layout:fixed;">
     <colgroup>
       <col style="width:90px;">
       ${dates.map(() => `<col style="width:100px;">`).join("")}
-      <col style="width:62px;">
     </colgroup>
     <thead>
     <tr>
@@ -332,14 +331,13 @@ async function renderMonthlySchedule(section) {
         const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
         return `<th data-date="${ymd(year, month, d)}" style="position:sticky;top:0;background:#F4FAEF;z-index:4;color:${wdColor};border-right:1px solid var(--border);">${month}.${pad2(d)}(${wd})</th>`;
       }).join("")}
-      <th style="position:sticky;right:0;top:0;background:#F4FAEF;z-index:6;border-left:1px solid var(--border);">날짜</th>
     </tr>
   </thead><tbody>`;
 
   // 근무장소 행
   html += `<tr><td style="${leftLabelStyle}">근무장소</td>`;
   dates.forEach(d => { html += cellHtml(ymd(year, month, d), "location"); });
-  html += `<td style="${rightLabelStyle}">근무장소</td></tr>`;
+  html += `</tr>`;
 
   // 지점별 특이사항 행
   SCHEDULE_NOTE_ROWS.forEach(rowLabel => {
@@ -347,7 +345,7 @@ async function renderMonthlySchedule(section) {
     const rowTextColor = LOCATION_TEXT_COLORS[rowLabel] || "#fff";
     html += `<tr><td style="${leftLabelStyle}background:${rowColor};color:${rowTextColor};">${escapeHtml(rowLabel)}</td>`;
     dates.forEach(d => { html += cellHtml(ymd(year, month, d), "note_" + rowLabel); });
-    html += `<td style="${rightLabelStyle}background:${rowColor};color:${rowTextColor};">${escapeHtml(rowLabel)}</td></tr>`;
+    html += `</tr>`;
   });
 
   // 30분 단위 시간표 행
@@ -355,7 +353,7 @@ async function renderMonthlySchedule(section) {
     const dividerStyle = si === 0 ? "border-top:3px solid var(--text-main);" : "";
     html += `<tr><td style="${leftLabelStyle}${dividerStyle}">${slot}</td>`;
     dates.forEach(d => { html += cellHtml(ymd(year, month, d), "time_" + slot, dividerStyle); });
-    html += `<td style="${rightLabelStyle}${dividerStyle}">${slot}</td></tr>`;
+    html += `</tr>`;
   });
 
   html += `</tbody></table>`;
