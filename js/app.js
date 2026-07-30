@@ -211,17 +211,22 @@ const SCHEDULE_KEYWORD_RULES = [
   { word: "휴무", bg: "#FFFFFF", color: "#E03C3C" }
 ];
 function computeScheduleCellStyle(text, explicitColor, explicitTextColor) {
-  if (explicitColor || explicitTextColor) {
-    return { bg: explicitColor || null, color: explicitTextColor || (explicitColor ? "#fff" : "inherit") };
-  }
+  // 지점명이나 "연차/회의/식사" 같은 키워드가 글자에 들어있으면, 예전에 지정해둔(또는 붙여넣기로 딸려온)
+  // 수동 색상이 남아있어도 자동 서식이 항상 우선 적용되도록 합니다.
   if (text) {
     for (const rule of SCHEDULE_KEYWORD_RULES) {
       if (text.includes(rule.word)) return { bg: rule.bg, color: rule.color };
     }
+    const autoBg = matchLocationColor(text);
+    if (autoBg) {
+      const autoTextColor = matchLocationTextColor(text);
+      return { bg: autoBg, color: autoTextColor || "#fff" };
+    }
   }
-  const bg = text ? matchLocationColor(text) : null;
-  const textColor = text ? matchLocationTextColor(text) : null;
-  return { bg, color: bg ? (textColor || "#fff") : "inherit" };
+  if (explicitColor || explicitTextColor) {
+    return { bg: explicitColor || null, color: explicitTextColor || (explicitColor ? "#fff" : "inherit") };
+  }
+  return { bg: null, color: "inherit" };
 }
 
 function findAdjacentCell(input, direction) {
@@ -262,13 +267,7 @@ async function renderMonthlySchedule(section) {
       <span id="activeCellHint" style="font-size:11px;color:var(--text-muted);">먼저 표에서 칸을 클릭한 뒤 색을 골라주세요.</span>
     </div>` : ""}
     <div id="scheduleTopScroll" style="overflow-x:auto;overflow-y:hidden;height:16px;margin-bottom:4px;"><div id="scheduleTopScrollInner" style="height:1px;"></div></div>
-    <div style="display:flex;align-items:stretch;">
-      <div class="card" id="scheduleScrollCard" style="overflow:auto;max-height:calc(100vh - 190px);flex:1;min-width:0;margin-right:0;border-top-right-radius:0;border-bottom-right-radius:0;"><div id="scheduleCalendar">불러오는 중...</div></div>
-      <div class="card" id="scheduleRightPanelWrap" style="overflow:hidden;max-height:calc(100vh - 190px);width:92px;flex-shrink:0;padding:0;display:flex;flex-direction:column;border-top-left-radius:0;border-bottom-left-radius:0;border-left:none;">
-        <div style="background:#F4FAEF;font-weight:700;padding:8px 10px;font-size:12px;border-bottom:2px solid var(--border);flex-shrink:0;box-sizing:border-box;">날짜</div>
-        <div style="overflow:hidden;flex:1;"><div id="scheduleRightPanel"></div></div>
-      </div>
-    </div>`;
+    <div class="card" id="scheduleScrollCard" style="overflow:auto;max-height:calc(100vh - 190px);"><div id="scheduleCalendar">불러오는 중...</div></div>`;
 
   document.getElementById("prevMonthBtn").onclick = () => {
     scheduleViewState.month--;
@@ -296,7 +295,7 @@ async function renderMonthlySchedule(section) {
 
   const cellBase = "white-space:normal;word-break:keep-all;overflow-wrap:break-word;min-width:80px;max-width:160px;text-align:center;border-right:1px solid var(--border);";
   const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:5;white-space:nowrap;font-weight:700;padding:5px 8px;border-right:1px solid var(--border);text-align:center;";
-  const rightLabelStyle = "background:#fff;white-space:nowrap;font-weight:700;padding:5px 8px;border-left:1px solid var(--border);box-sizing:border-box;text-align:center;";
+  const rightLabelStyle = "position:sticky;right:0;background:#fff;z-index:5;white-space:nowrap;font-weight:700;padding:5px 8px;border-left:1px solid var(--border);box-sizing:border-box;text-align:center;";
 
   function getCellValue(dateStr, rowKey) {
     const entry = byDate[dateStr];
@@ -323,6 +322,7 @@ async function renderMonthlySchedule(section) {
     <colgroup>
       <col style="width:90px;">
       ${dates.map(() => `<col style="width:100px;">`).join("")}
+      <col style="width:90px;">
     </colgroup>
     <thead>
     <tr>
@@ -332,19 +332,14 @@ async function renderMonthlySchedule(section) {
         const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
         return `<th data-date="${ymd(year, month, d)}" style="position:sticky;top:0;background:#F4FAEF;z-index:4;color:${wdColor};border-right:1px solid var(--border);">${month}.${pad2(d)}(${wd})</th>`;
       }).join("")}
+      <th style="position:sticky;right:0;top:0;background:#F4FAEF;z-index:6;border-left:1px solid var(--border);">날짜</th>
     </tr>
   </thead><tbody>`;
-
-  // 오른쪽 패널(근무장소·지점·시간 라벨) - 가로 스크롤과 완전히 분리된 별도 표로 만들어서,
-  // 스크롤을 아무리 밀어도 항상 화면 오른쪽에 고정되어 보이게 합니다. (머리글은 별도 고정 요소로 처리)
-  let rightHtml = `<table class="table-compact" style="width:92px;border-collapse:separate;border-spacing:0;table-layout:fixed;">
-    <colgroup><col style="width:92px;"></colgroup><tbody>`;
 
   // 근무장소 행
   html += `<tr><td style="${leftLabelStyle}">근무장소</td>`;
   dates.forEach(d => { html += cellHtml(ymd(year, month, d), "location"); });
-  html += `</tr>`;
-  rightHtml += `<tr><td style="${rightLabelStyle}">근무장소</td></tr>`;
+  html += `<td style="${rightLabelStyle}">근무장소</td></tr>`;
 
   // 지점별 특이사항 행
   SCHEDULE_NOTE_ROWS.forEach(rowLabel => {
@@ -352,8 +347,7 @@ async function renderMonthlySchedule(section) {
     const rowTextColor = LOCATION_TEXT_COLORS[rowLabel] || "#fff";
     html += `<tr><td style="${leftLabelStyle}background:${rowColor};color:${rowTextColor};">${escapeHtml(rowLabel)}</td>`;
     dates.forEach(d => { html += cellHtml(ymd(year, month, d), "note_" + rowLabel); });
-    html += `</tr>`;
-    rightHtml += `<tr><td style="${rightLabelStyle}background:${rowColor};color:${rowTextColor};">${escapeHtml(rowLabel)}</td></tr>`;
+    html += `<td style="${rightLabelStyle}background:${rowColor};color:${rowTextColor};">${escapeHtml(rowLabel)}</td></tr>`;
   });
 
   // 30분 단위 시간표 행
@@ -361,54 +355,33 @@ async function renderMonthlySchedule(section) {
     const dividerStyle = si === 0 ? "border-top:3px solid var(--text-main);" : "";
     html += `<tr><td style="${leftLabelStyle}${dividerStyle}">${slot}</td>`;
     dates.forEach(d => { html += cellHtml(ymd(year, month, d), "time_" + slot, dividerStyle); });
-    html += `</tr>`;
-    rightHtml += `<tr><td style="${rightLabelStyle}${dividerStyle}">${slot}</td></tr>`;
+    html += `<td style="${rightLabelStyle}${dividerStyle}">${slot}</td></tr>`;
   });
 
   html += `</tbody></table>`;
-  rightHtml += `</tbody></table>`;
   document.getElementById("scheduleCalendar").innerHTML = html;
-  document.getElementById("scheduleRightPanel").innerHTML = rightHtml;
-
-  // 이제 칸 내용이 길면 줄바꿈되면서 그 줄의 높이가 늘어날 수 있는데, 오른쪽 라벨 패널은 별도의 표라
-  // 자동으로 같이 늘어나지 않아요. 그래서 실제 렌더링된 줄 높이를 재서 오른쪽 패널에도 똑같이 맞춰줍니다.
-  function syncRowHeights() {
-    const mainRows = document.querySelectorAll("#scheduleCalendar table tbody tr");
-    const rightRows = document.querySelectorAll("#scheduleRightPanel table tbody tr");
-    mainRows.forEach((tr, i) => {
-      const rightRow = rightRows[i];
-      if (!rightRow) return;
-      tr.style.height = "";
-      rightRow.style.height = "";
-      const h = Math.max(tr.getBoundingClientRect().height, rightRow.getBoundingClientRect().height);
-      tr.style.height = h + "px";
-      rightRow.style.height = h + "px";
-    });
-  }
-  requestAnimationFrame(syncRowHeights);
-  // 커스텀 폰트가 이 시점 이후에 늦게 로드되면 글자 폭이 바뀌면서 줄바꿈 여부도 달라질 수 있어서,
-  // 폰트 로딩이 끝난 뒤와 약간의 시간이 지난 뒤에도 한 번씩 더 맞춰줍니다.
-  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(syncRowHeights); }
-  setTimeout(syncRowHeights, 300);
-  setTimeout(syncRowHeights, 800);
 
   // 표가 옆으로 길어서 스크롤바가 화면 맨 아래에만 있으면 찾기 불편하니, 표 위에도 스크롤바를 하나 더 만들어서 서로 맞물려 움직이게 합니다.
   const scrollCard = document.getElementById("scheduleScrollCard");
   const topScroll = document.getElementById("scheduleTopScroll");
   const topScrollInner = document.getElementById("scheduleTopScrollInner");
   const scheduleTable = document.querySelector("#scheduleCalendar table");
-  const rightPanel = document.getElementById("scheduleRightPanel");
   if (scrollCard && topScroll && topScrollInner && scheduleTable) {
-    // 세로 스크롤바 유무 때문에 두 트랙의 실제 폭이 미세하게 달라질 수 있어서,
-    // 위쪽 스크롤바 폭을 아래쪽(세로 스크롤바를 뺀) 폭에 정확히 맞춥니다.
+    // 오른쪽 고정 열 폭만큼, 스크롤을 끝까지 밀었을 때도 마지막 날짜 칸이 가려지지 않고 다 드러나도록
+    // 표 자체에 그만큼의 여유 공간(margin)을 붙입니다.
     const syncWidths = () => {
-      topScrollInner.style.width = scheduleTable.scrollWidth + "px";
+      const rightStickyCell = scheduleTable.querySelector("tr:first-child th:last-child");
+      const rightStickyWidth = rightStickyCell ? rightStickyCell.getBoundingClientRect().width : 0;
+      scheduleTable.style.marginRight = rightStickyWidth + "px";
+      topScrollInner.style.width = scheduleTable.scrollWidth + rightStickyWidth + "px";
       const scrollbarGutter = scrollCard.offsetWidth - scrollCard.clientWidth;
       topScroll.style.paddingRight = scrollbarGutter + "px";
     };
-    // 폰트/셀 크기가 자리 잡은 뒤에 폭을 재도록 한 프레임 뒤에 다시 계산합니다.
+    // 폰트/셀 크기가 자리 잡은 뒤에 폭을 재도록 한 프레임 뒤, 그리고 폰트 로딩이 끝난 뒤에도 다시 계산합니다.
     syncWidths();
     requestAnimationFrame(syncWidths);
+    if (document.fonts && document.fonts.ready) { document.fonts.ready.then(syncWidths); }
+    setTimeout(syncWidths, 300);
     window.addEventListener("resize", syncWidths);
 
     let syncing = false;
@@ -423,13 +396,6 @@ async function renderMonthlySchedule(section) {
     topScroll.addEventListener("scroll", () => syncByRatio(topScroll, scrollCard));
     scrollCard.addEventListener("scroll", () => syncByRatio(scrollCard, topScroll));
 
-    // 오른쪽 근무장소·지점·시간 라벨 패널은 가로 스크롤과는 완전히 분리되어 있고(항상 고정),
-    // 세로로 스크롤할 때만 메인 표와 같이 움직이도록 위치를 맞춰줍니다.
-    if (rightPanel) {
-      scrollCard.addEventListener("scroll", () => {
-        rightPanel.style.transform = `translateY(${-scrollCard.scrollTop}px)`;
-      });
-    }
 
     // 이번 달을 보고 있을 때는, 오늘 날짜 칸이 (왼쪽에 고정된 라벨 열 바로 다음) 화면 맨 왼쪽에 오도록 자동으로 스크롤합니다.
     const today = new Date();
@@ -481,7 +447,6 @@ async function renderMonthlySchedule(section) {
           const { bg, color } = computeScheduleCellStyle(value, existing.color || null, existing.textColor || null);
           const td = input.closest("td");
           td.style.cssText = `${cellBase}${bg ? `background:${bg};color:${color};font-weight:700;` : ""}padding:0;border-radius:4px;`;
-          syncRowHeights();
         } catch (err) {
           alert("저장 중 오류: " + err.message);
         }
