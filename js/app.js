@@ -370,6 +370,23 @@ async function renderMonthlySchedule(section) {
   document.getElementById("scheduleCalendar").innerHTML = html;
   document.getElementById("scheduleRightPanel").innerHTML = rightHtml;
 
+  // 이제 칸 내용이 길면 줄바꿈되면서 그 줄의 높이가 늘어날 수 있는데, 오른쪽 라벨 패널은 별도의 표라
+  // 자동으로 같이 늘어나지 않아요. 그래서 실제 렌더링된 줄 높이를 재서 오른쪽 패널에도 똑같이 맞춰줍니다.
+  function syncRowHeights() {
+    const mainRows = document.querySelectorAll("#scheduleCalendar table tbody tr");
+    const rightRows = document.querySelectorAll("#scheduleRightPanel table tbody tr");
+    mainRows.forEach((tr, i) => {
+      const rightRow = rightRows[i];
+      if (!rightRow) return;
+      tr.style.height = "";
+      rightRow.style.height = "";
+      const h = Math.max(tr.getBoundingClientRect().height, rightRow.getBoundingClientRect().height);
+      tr.style.height = h + "px";
+      rightRow.style.height = h + "px";
+    });
+  }
+  requestAnimationFrame(syncRowHeights);
+
   // 표가 옆으로 길어서 스크롤바가 화면 맨 아래에만 있으면 찾기 불편하니, 표 위에도 스크롤바를 하나 더 만들어서 서로 맞물려 움직이게 합니다.
   const scrollCard = document.getElementById("scheduleScrollCard");
   const topScroll = document.getElementById("scheduleTopScroll");
@@ -459,6 +476,7 @@ async function renderMonthlySchedule(section) {
           const { bg, color } = computeScheduleCellStyle(value, existing.color || null, existing.textColor || null);
           const td = input.closest("td");
           td.style.cssText = `${cellBase}${bg ? `background:${bg};color:${color};font-weight:700;` : ""}padding:0;border-radius:4px;`;
+          syncRowHeights();
         } catch (err) {
           alert("저장 중 오류: " + err.message);
         }
