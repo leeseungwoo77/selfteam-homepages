@@ -386,6 +386,11 @@ async function renderMonthlySchedule(section) {
     });
   }
   requestAnimationFrame(syncRowHeights);
+  // 커스텀 폰트가 이 시점 이후에 늦게 로드되면 글자 폭이 바뀌면서 줄바꿈 여부도 달라질 수 있어서,
+  // 폰트 로딩이 끝난 뒤와 약간의 시간이 지난 뒤에도 한 번씩 더 맞춰줍니다.
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(syncRowHeights); }
+  setTimeout(syncRowHeights, 300);
+  setTimeout(syncRowHeights, 800);
 
   // 표가 옆으로 길어서 스크롤바가 화면 맨 아래에만 있으면 찾기 불편하니, 표 위에도 스크롤바를 하나 더 만들어서 서로 맞물려 움직이게 합니다.
   const scrollCard = document.getElementById("scheduleScrollCard");
