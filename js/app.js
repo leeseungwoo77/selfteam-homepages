@@ -295,7 +295,7 @@ async function renderMonthlySchedule(section) {
 
   const cellBase = "white-space:normal;word-break:keep-all;overflow-wrap:break-word;min-width:80px;max-width:160px;text-align:center;border-right:1px solid var(--border);";
   const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:5;white-space:nowrap;font-weight:700;padding:5px 8px;border-right:1px solid var(--border);text-align:center;";
-  const rightLabelStyle = "position:sticky;right:0;background:#fff;z-index:5;white-space:nowrap;font-weight:700;padding:5px 8px;border-left:1px solid var(--border);box-sizing:border-box;text-align:center;";
+  const rightLabelStyle = "position:sticky;right:0;background:#fff;z-index:5;white-space:normal;word-break:keep-all;font-weight:700;padding:5px 4px;border-left:1px solid var(--border);box-sizing:border-box;text-align:center;line-height:1.2;";
 
   function getCellValue(dateStr, rowKey) {
     const entry = byDate[dateStr];
@@ -322,7 +322,7 @@ async function renderMonthlySchedule(section) {
     <colgroup>
       <col style="width:90px;">
       ${dates.map(() => `<col style="width:100px;">`).join("")}
-      <col style="width:90px;">
+      <col style="width:62px;">
     </colgroup>
     <thead>
     <tr>
@@ -1557,11 +1557,11 @@ function openMeetingDetailModal(section, entry) {
           if (el) data[f.key] = sanitizeRichHtml(el.innerHTML);
         });
         await updateDoc(doc(db, section.collectionName, entry.id), data);
+        Object.assign(entry, data);
         showToast("표시가 저장되었습니다.");
-        root.innerHTML = "";
-        renderSection(section.key);
       } catch (err) {
         alert("저장 중 오류: " + err.message);
+      } finally {
         btn.disabled = false;
         btn.textContent = "표시 저장";
       }
@@ -3562,8 +3562,9 @@ function openModal(section, existing, prefill) {
       </form>
     </div></div>`;
 
-  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
-  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  let savedOnce = false;
+  document.getElementById("cancelBtn").onclick = () => { root.innerHTML = ""; if (savedOnce) renderSection(section.key); };
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") { root.innerHTML = ""; if (savedOnce) renderSection(section.key); } });
 
   function renderThumbs(key) {
     const wrap = document.getElementById(`imgthumbs_${key}`);
@@ -3626,6 +3627,9 @@ function openModal(section, existing, prefill) {
           uploadedUrls.push(await getDownloadURL(fileRef));
         }
         data[f.key] = [...st.urls, ...uploadedUrls];
+        st.urls = data[f.key];
+        st.files = [];
+        renderThumbs(f.key);
       }
       if (formFields.some(f => f.type === "branchSelect")) {
         if (state.profile.role !== "leader") {
@@ -3645,14 +3649,19 @@ function openModal(section, existing, prefill) {
 
       if (existing) {
         await updateDoc(doc(db, section.collectionName, existing.id), data);
+        Object.assign(existing, data);
       } else {
         data.createdAt = new Date().toISOString();
         data.createdBy = state.profile.name;
-        await addDoc(collection(db, section.collectionName), data);
+        const newRef = await addDoc(collection(db, section.collectionName), data);
+        existing = { id: newRef.id, ...data };
+        const titleEl = root.querySelector(".modal h3");
+        if (titleEl) titleEl.textContent = `수정 · ${section.label}`;
       }
-      root.innerHTML = "";
+      savedOnce = true;
       showToast("저장되었습니다.");
-      renderSection(section.key);
+      saveBtn.disabled = false;
+      saveBtn.textContent = "저장";
     } catch (err) {
       alert("저장 중 오류: " + err.message);
       saveBtn.disabled = false;
