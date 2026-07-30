@@ -318,7 +318,7 @@ async function renderMonthlySchedule(section) {
     return `<td style="${cellBase}${bgStyle}${extra}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
 
-  let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;table-layout:fixed;">
+  let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;table-layout:fixed;margin-right:100px;">
     <colgroup>
       <col style="width:90px;">
       ${dates.map(() => `<col style="width:100px;">`).join("")}
@@ -367,13 +367,9 @@ async function renderMonthlySchedule(section) {
   const topScrollInner = document.getElementById("scheduleTopScrollInner");
   const scheduleTable = document.querySelector("#scheduleCalendar table");
   if (scrollCard && topScroll && topScrollInner && scheduleTable) {
-    // 오른쪽 고정 열 폭만큼, 스크롤을 끝까지 밀었을 때도 마지막 날짜 칸이 가려지지 않고 다 드러나도록
-    // 표 자체에 그만큼의 여유 공간(margin)을 붙입니다.
+    // 표 자체에 이미 여유 공간(margin-right:100px)을 넉넉히 붙여놨어요. 위쪽 미러 스크롤바 폭만 실제 폭에 맞춰줍니다.
     const syncWidths = () => {
-      const rightStickyCell = scheduleTable.querySelector("tr:first-child th:last-child");
-      const rightStickyWidth = rightStickyCell ? rightStickyCell.getBoundingClientRect().width : 0;
-      scheduleTable.style.marginRight = rightStickyWidth + "px";
-      topScrollInner.style.width = scheduleTable.scrollWidth + rightStickyWidth + "px";
+      topScrollInner.style.width = scheduleTable.scrollWidth + "px";
       const scrollbarGutter = scrollCard.offsetWidth - scrollCard.clientWidth;
       topScroll.style.paddingRight = scrollbarGutter + "px";
     };
