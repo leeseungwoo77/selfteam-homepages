@@ -294,9 +294,9 @@ async function renderMonthlySchedule(section) {
   const dates = [];
   for (let d = 1; d <= nDays; d++) dates.push(d);
 
-  const cellBase = "white-space:nowrap;min-width:80px;max-width:160px;overflow:hidden;text-overflow:ellipsis;text-align:left;padding-left:6px;border-right:1px solid var(--border);";
-  const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:5;white-space:nowrap;font-weight:700;padding:5px 8px;border-right:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;";
-  const rightLabelStyle = "background:#fff;white-space:nowrap;font-weight:700;padding:5px 8px;border-left:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;";
+  const cellBase = "white-space:normal;word-break:keep-all;overflow-wrap:break-word;min-width:80px;max-width:160px;text-align:center;border-right:1px solid var(--border);";
+  const leftLabelStyle = "position:sticky;left:0;background:#fff;z-index:5;white-space:nowrap;font-weight:700;padding:5px 8px;border-right:1px solid var(--border);text-align:center;";
+  const rightLabelStyle = "background:#fff;white-space:nowrap;font-weight:700;padding:5px 8px;border-left:1px solid var(--border);box-sizing:border-box;text-align:center;";
 
   function getCellValue(dateStr, rowKey) {
     const entry = byDate[dateStr];
@@ -314,7 +314,7 @@ async function renderMonthlySchedule(section) {
     if (canEdit) {
       return `<td style="${cellBase}${bgStyle}${extra}padding:0;border-radius:4px;">
         <input type="text" class="sched-cell" data-date="${dateStr}" data-row="${rowKey}" value="${escapeHtml(cell.text)}"
-          style="display:block;width:100%;max-width:100%;box-sizing:border-box;border:none;background:transparent;color:inherit;font-weight:inherit;text-align:left;padding:0 0 0 6px;outline:none;font-family:inherit;font-size:inherit;overflow:hidden;text-overflow:ellipsis;"></td>`;
+          style="display:block;width:100%;max-width:100%;box-sizing:border-box;border:none;background:transparent;color:inherit;font-weight:inherit;text-align:center;outline:none;font-family:inherit;font-size:inherit;"></td>`;
     }
     return `<td style="${cellBase}${bgStyle}${extra}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
@@ -330,7 +330,7 @@ async function renderMonthlySchedule(section) {
       ${dates.map(d => {
         const wd = weekdayLabel(year, month, d);
         const wdColor = wd === "토" ? "var(--blue-deep)" : wd === "일" ? "var(--danger)" : "var(--text-main)";
-        return `<th data-date="${ymd(year, month, d)}" style="position:sticky;top:0;background:#F4FAEF;z-index:4;color:${wdColor};border-right:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;">${month}.${pad2(d)}(${wd})</th>`;
+        return `<th data-date="${ymd(year, month, d)}" style="position:sticky;top:0;background:#F4FAEF;z-index:4;color:${wdColor};border-right:1px solid var(--border);">${month}.${pad2(d)}(${wd})</th>`;
       }).join("")}
     </tr>
   </thead><tbody>`;
