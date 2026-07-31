@@ -414,6 +414,9 @@ async function renderMonthlySchedule(section) {
       input.addEventListener("focus", () => {
         activeCellInput = input;
         document.getElementById("activeCellHint").textContent = `${input.dataset.date} 칸 선택됨`;
+        document.querySelectorAll("#scheduleCalendar td.sched-row-active").forEach(td => td.classList.remove("sched-row-active"));
+        const rowLabelTd = input.closest("tr")?.querySelector("td:first-child");
+        if (rowLabelTd) rowLabelTd.classList.add("sched-row-active");
       });
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
