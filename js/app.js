@@ -425,11 +425,17 @@ async function renderMonthlySchedule(section) {
           if (below) { below.focus(); below.select(); } else { input.blur(); }
           return;
         }
+        // Shift/Ctrl/Cmd/Alt를 누르고 있으면 글자 선택·복사 등 원래 하려던 동작을 방해하지 않도록 그냥 둡니다.
+        if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
         const arrowMap = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
-        if (arrowMap[e.key]) {
-          const target = findAdjacentCell(input, arrowMap[e.key]);
-          if (target) { e.preventDefault(); target.focus(); target.select(); }
-        }
+        if (!arrowMap[e.key]) return;
+        const hasSelection = input.selectionStart !== input.selectionEnd;
+        // 좌우 이동은 커서가 글자 맨 앞/맨 끝에 있고 선택된 글자가 없을 때만 옆 칸으로 넘어가고,
+        // 글자 중간에 커서가 있을 땐 그냥 커서만 움직이게(원래 입력창 동작) 둡니다.
+        if (e.key === "ArrowLeft" && (hasSelection || input.selectionStart !== 0)) return;
+        if (e.key === "ArrowRight" && (hasSelection || input.selectionEnd !== input.value.length)) return;
+        const target = findAdjacentCell(input, arrowMap[e.key]);
+        if (target) { e.preventDefault(); target.focus(); target.select(); }
       });
       input.addEventListener("blur", async () => {
         const dateStr = input.dataset.date;
