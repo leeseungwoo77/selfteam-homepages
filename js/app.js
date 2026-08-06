@@ -395,15 +395,17 @@ async function renderMonthlySchedule(section) {
     const today = new Date();
     if (year === today.getFullYear() && month === today.getMonth() + 1) {
       const scrollToToday = () => {
-        const todayStr = ymd(year, month, today.getDate());
-        const todayTh = scheduleTable.querySelector(`th[data-date="${todayStr}"]`);
-        const firstTh = scheduleTable.querySelector("th");
-        if (!todayTh || !firstTh) return;
-        const target = Math.max(0, todayTh.offsetLeft - firstTh.offsetWidth);
+        // th의 offsetLeft를 재는 대신, 이미 고정해둔 칸 폭(날짜 칸 100px)으로 직접 계산합니다.
+        // 레이아웃이 아직 자리 잡기 전에 재면 값이 틀어질 수 있어서, 계산 자체를 폰트/레이아웃 타이밍에 영향받지 않게 합니다.
+        const dayIndex = today.getDate() - 1; // 이 달의 며칠째인지 (0부터 시작)
+        const target = Math.max(0, dayIndex * 100);
         scrollCard.scrollLeft = target;
         syncByRatio(scrollCard, topScroll);
       };
+      scrollToToday();
       requestAnimationFrame(scrollToToday);
+      if (document.fonts && document.fonts.ready) { document.fonts.ready.then(scrollToToday); }
+      setTimeout(scrollToToday, 300);
     }
   }
 
@@ -3336,13 +3338,20 @@ function wrapSelectionWithClass(editEl, className) {
   if (!editEl.contains(range.commonAncestorContainer)) return;
   const span = document.createElement("span");
   if (className) span.className = className;
+  const finish = () => {
+    // 이미 크기가 지정된 글자를 다시 선택해서 새 크기를 적용하면, 안쪽에 예전 크기 클래스가 그대로 남아있어서
+    // 화면엔 예전 크기가 계속 이겨버리는 문제가 있었어요. 새로 감싼 범위 안의 예전 크기 지정은 지워줍니다.
+    span.querySelectorAll(".rt-small, .rt-large").forEach(el => { el.classList.remove("rt-small", "rt-large"); });
+  };
   try {
     range.surroundContents(span);
+    finish();
   } catch (err) {
     try {
       const frag = range.extractContents();
       span.appendChild(frag);
       range.insertNode(span);
+      finish();
     } catch (err2) { /* 선택 영역이 복잡하면 그냥 포기합니다 */ }
   }
 }
@@ -3353,13 +3362,24 @@ function wrapSelectionWithStyle(editEl, styleText) {
   if (!editEl.contains(range.commonAncestorContainer)) return;
   const span = document.createElement("span");
   span.setAttribute("style", styleText);
+  const propName = styleText.split(":")[0].trim();
+  const finish = () => {
+    // 이미 색이나 굵기가 지정된 글자를 다시 선택해서 새로 적용하면, 안쪽에 예전 지정이 남아있어서
+    // 화면엔 예전 값이 계속 이겨버리는 문제가 있었어요. 새로 감싼 범위 안의 같은 속성은 지워줍니다.
+    span.querySelectorAll("[style]").forEach(el => {
+      el.style.removeProperty(propName);
+      if (!el.getAttribute("style").trim()) el.removeAttribute("style");
+    });
+  };
   try {
     range.surroundContents(span);
+    finish();
   } catch (err) {
     try {
       const frag = range.extractContents();
       span.appendChild(frag);
       range.insertNode(span);
+      finish();
     } catch (err2) { /* 선택 영역이 복잡하면 그냥 포기합니다 */ }
   }
 }
