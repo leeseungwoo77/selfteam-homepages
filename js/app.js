@@ -772,6 +772,9 @@ function folderToSection(folder) {
   if (folder.template === "metricAnalysis") {
     return { ...base, isMetricAnalysis: true, desc: folder.desc || "연결한 구글 시트의 지표를 두 시점 기준으로 비교합니다." };
   }
+  if (folder.template === "taskTracking") {
+    return { ...base, isTaskTracking: true, desc: folder.desc || "팀장이 각 지점 원장님에게 동일하게 내린 업무 지시를 지점별로 체크하고, 완료율·마감기한을 관리합니다." };
+  }
   return {
     ...base,
     cardView: true,
@@ -965,6 +968,7 @@ async function renderSection(key) {
   if (section.isOkr) { renderOkrFolder(section); return; }
   if (section.isMetricAnalysis) { renderMetricAnalysis(section); return; }
   if (section.isRosterGrid) { renderRosterGrid(section); return; }
+  if (section.isTaskTracking) { renderTaskTracking(section); return; }
   if (section.isMeetingGrid) { renderMeetingGrid(section); return; }
   if (section.cardView) { renderFolderGrid(section); return; }
 
@@ -2249,6 +2253,209 @@ function krAchievement(kr) {
 function overallAchievement(krs) {
   if (!krs || !krs.length) return 0;
   return Math.round(krs.reduce((s, k) => s + krAchievement(k), 0) / krs.length);
+}
+
+/* ===================== 업무 트레킹 - 지점별 지시 체크리스트 · 완료율 · 마감기한 =====================
+   문서 하나 = 업무 하나. branchDone: { [지점ID]: true } 형태로 지점별 지시 완료 여부를 저장합니다.
+=========================================================== */
+function taskDdayInfo(deadline) {
+  if (!deadline) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const dl = new Date(deadline + "T00:00:00");
+  const diffDays = Math.round((dl - today) / 86400000);
+  if (diffDays < 0) return { label: `기한 ${Math.abs(diffDays)}일 지남`, tone: "overdue" };
+  if (diffDays === 0) return { label: "오늘 마감", tone: "soon" };
+  if (diffDays <= 3) return { label: `D-${diffDays}`, tone: "soon" };
+  return { label: `D-${diffDays}`, tone: "normal" };
+}
+const TASK_TONE_STYLE = {
+  overdue: "background:#FDEAEA;color:#C0392B;",
+  soon: "background:#FFF4DE;color:#B9770E;",
+  normal: "background:#EEF3FA;color:var(--blue-deep);"
+};
+function taskDoneCount(task, branches) {
+  const map = task.branchDone || {};
+  return branches.reduce((n, b) => n + (map[b.id] ? 1 : 0), 0);
+}
+function taskCompletionRate(task, branches) {
+  if (!branches.length) return 0;
+  return Math.round((taskDoneCount(task, branches) / branches.length) * 100);
+}
+function sortTasksForTracking(docs) {
+  return [...docs].sort((a, b) => {
+    if (a.deadline && b.deadline) { if (a.deadline !== b.deadline) return a.deadline < b.deadline ? -1 : 1; }
+    else if (a.deadline) return -1;
+    else if (b.deadline) return 1;
+    return (b.createdAt || "").localeCompare(a.createdAt || "");
+  });
+}
+
+async function renderTaskTracking(section) {
+  const main = document.getElementById("mainContent");
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <p>${section.desc}</p>
+      </div>
+      ${canWriteSection(section) ? `<button class="btn small" id="addTaskBtn">+ 새 업무 등록</button>` : ""}
+    </div>
+    <div id="taskStatsWrap" style="margin-bottom:16px;"></div>
+    <div class="card" style="overflow:auto;"><div id="taskGridWrap">불러오는 중...</div></div>`;
+
+  if (canWriteSection(section)) {
+    document.getElementById("addTaskBtn").onclick = () => openTaskModal(section, null);
+  }
+
+  const docs = await fetchDocs(section);
+  renderTaskTrackingBody(section, docs);
+}
+
+function renderTaskStats(tasks, branches) {
+  const wrap = document.getElementById("taskStatsWrap");
+  if (!wrap) return;
+  if (!tasks.length) { wrap.innerHTML = ""; return; }
+  const avgRate = Math.round(tasks.reduce((sum, t) => sum + taskCompletionRate(t, branches), 0) / tasks.length);
+  const overdueCount = tasks.filter(t => taskDdayInfo(t.deadline)?.tone === "overdue" && taskCompletionRate(t, branches) < 100).length;
+  const doneCount = tasks.filter(t => taskCompletionRate(t, branches) === 100).length;
+  wrap.innerHTML = `<div class="stat-grid">
+    <div class="stat-card"><div class="label">전체 업무</div><div class="value">${tasks.length}건</div></div>
+    <div class="stat-card"><div class="label">지시 완료율(평균)</div><div class="value">${avgRate}%</div></div>
+    <div class="stat-card"><div class="label">전 지점 완료</div><div class="value">${doneCount}건</div></div>
+    <div class="stat-card"><div class="label">마감 지남(미완료)</div><div class="value" style="${overdueCount ? "color:#C0392B;" : ""}">${overdueCount}건</div></div>
+  </div>`;
+}
+
+function renderTaskTrackingBody(section, docs) {
+  const wrap = document.getElementById("taskGridWrap");
+  const branches = [...state.branches];
+  const tasks = sortTasksForTracking(docs);
+  renderTaskStats(tasks, branches);
+
+  if (!branches.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다. "지점 · 팀원 관리"에서 지점을 먼저 추가해주세요.</div>`; return; }
+  if (!tasks.length) { wrap.innerHTML = `<div class="empty-state">아직 등록된 업무가 없습니다.${canWriteSection(section) ? " 위에서 새 업무를 등록해보세요." : ""}</div>`; return; }
+
+  const editableGlobally = canWriteSection(section);
+
+  let html = `<table style="min-width:${760 + branches.length * 90}px;"><thead><tr>
+    <th style="min-width:220px;">업무명</th>
+    <th style="min-width:110px;">마감기한</th>
+    ${branches.map(b => `<th style="text-align:center;min-width:80px;">${escapeHtml(b.name)}</th>`).join("")}
+    <th style="min-width:130px;">완료율</th>
+    ${editableGlobally ? `<th style="min-width:80px;">관리</th>` : ""}
+  </tr></thead><tbody>`;
+
+  tasks.forEach(task => {
+    const dday = taskDdayInfo(task.deadline);
+    const rate = taskCompletionRate(task, branches);
+    const rowTone = dday?.tone === "overdue" && rate < 100 ? "background:#FFFBF8;" : "";
+    html += `<tr style="${rowTone}">
+      <td>
+        <div style="font-weight:700;">${escapeHtml(task.title || "")}</div>
+        ${task.note ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;white-space:pre-wrap;">${escapeHtml(task.note)}</div>` : ""}
+      </td>
+      <td style="white-space:nowrap;">
+        ${task.deadline ? `<div class="mono" style="font-size:12.5px;">${escapeHtml(task.deadline)}</div>` : ""}
+        ${dday ? `<span class="pill" style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;${TASK_TONE_STYLE[dday.tone]}">${dday.label}</span>` : `<span style="font-size:12px;color:var(--text-muted);">-</span>`}
+      </td>
+      ${branches.map(b => {
+        const checked = !!(task.branchDone && task.branchDone[b.id]);
+        const canToggle = editableGlobally || canCreateForBranch(section, b.id);
+        return `<td style="text-align:center;">
+          <input type="checkbox" data-task-toggle="${task.id}" data-branch="${b.id}" ${checked ? "checked" : ""} ${canToggle ? "" : "disabled"} style="width:18px;height:18px;cursor:${canToggle ? "pointer" : "default"};">
+        </td>`;
+      }).join("")}
+      <td>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;background:var(--bg-soft,#EEF1EA);border-radius:6px;height:8px;overflow:hidden;min-width:50px;">
+            <div style="background:${rate === 100 ? "var(--green-bright)" : "var(--blue-bright)"};height:100%;width:${rate}%;"></div>
+          </div>
+          <span class="mono" style="font-size:12.5px;font-weight:700;white-space:nowrap;">${taskDoneCount(task, branches)}/${branches.length}</span>
+        </div>
+      </td>
+      ${editableGlobally ? `<td style="white-space:nowrap;">
+        <button class="icon-btn" data-edit-task="${task.id}">수정</button>
+        <button class="icon-btn danger" data-del-task="${task.id}">삭제</button>
+      </td>` : ""}
+    </tr>`;
+  });
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll("[data-task-toggle]").forEach(chk => {
+    chk.onchange = async () => {
+      const taskId = chk.dataset.taskToggle;
+      const branchId = chk.dataset.branch;
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
+      const wasChecked = chk.checked;
+      chk.disabled = true;
+      try {
+        await updateDoc(doc(db, "folderEntries", taskId), { [`branchDone.${branchId}`]: wasChecked });
+        task.branchDone = { ...(task.branchDone || {}), [branchId]: wasChecked };
+        renderTaskTrackingBody(section, tasks);
+      } catch (err) {
+        chk.checked = !wasChecked;
+        chk.disabled = false;
+        alert("저장 중 오류가 발생했습니다: " + err.message);
+      }
+    };
+  });
+  wrap.querySelectorAll("[data-edit-task]").forEach(btn => {
+    btn.onclick = () => openTaskModal(section, tasks.find(t => t.id === btn.dataset.editTask));
+  });
+  wrap.querySelectorAll("[data-del-task]").forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm("이 업무를 삭제할까요?")) return;
+      await deleteDoc(doc(db, "folderEntries", btn.dataset.delTask));
+      showToast("삭제되었습니다.");
+      renderSection(section.key);
+    };
+  });
+}
+
+function openTaskModal(section, existing) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>${existing ? "업무 수정" : "새 업무 등록"} · ${section.label}</h3>
+      <form id="taskForm">
+        <div class="field"><label>업무명</label><input type="text" id="taskTitle" value="${escapeHtml(existing?.title || "")}" placeholder="예: 8월 상담 매뉴얼 배포" required></div>
+        <div class="field"><label>마감기한</label><input type="date" id="taskDeadline" value="${escapeHtml(existing?.deadline || "")}"></div>
+        <div class="field"><label>지시 내용(선택)</label><textarea id="taskNote" rows="3" placeholder="원장님께 전달할 지시 내용을 적어두면 체크리스트 아래에 함께 표시됩니다.">${escapeHtml(existing?.note || "")}</textarea></div>
+        <p style="font-size:11px;color:var(--text-muted);margin:-6px 0 10px;">등록 후 목록 표에서 지점별로 체크박스를 눌러 지시 완료 여부를 표시할 수 있어요.</p>
+        <div class="grid-2" style="margin-top:10px;">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="submit" class="btn" id="saveTaskBtn">저장</button>
+        </div>
+      </form>
+    </div></div>`;
+  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  document.getElementById("taskForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = document.getElementById("taskTitle").value.trim();
+    if (!title) return;
+    const deadline = document.getElementById("taskDeadline").value;
+    const note = document.getElementById("taskNote").value.trim();
+    const saveBtn = document.getElementById("saveTaskBtn");
+    saveBtn.disabled = true;
+    try {
+      if (existing) {
+        await updateDoc(doc(db, "folderEntries", existing.id), { title, deadline, note });
+      } else {
+        await addDoc(collection(db, "folderEntries"), {
+          folderId: section.folderId, title, deadline, note,
+          branchDone: {}, createdAt: new Date().toISOString(), createdBy: state.profile.name
+        });
+      }
+      root.innerHTML = "";
+      showToast("저장되었습니다.");
+      renderSection(section.key);
+    } catch (err) {
+      saveBtn.disabled = false;
+      alert("저장 중 오류가 발생했습니다: " + err.message);
+    }
+  });
 }
 
 /* ===================== 지표 분석 - 연결한 구글 시트 기반 다양한 분석 ===================== */
@@ -3860,9 +4067,10 @@ function openMenuEditModal(item) {
         ${permissionHtml}
         ${item.isCustom ? `<div class="field"><label>양식 종류</label>
           <select id="menuEditTemplate">
-            <option value="standard" ${item.template !== "okr" && item.template !== "metricAnalysis" ? "selected" : ""}>일반 (제목 + 내용 + 이미지)</option>
+            <option value="standard" ${item.template !== "okr" && item.template !== "metricAnalysis" && item.template !== "taskTracking" ? "selected" : ""}>일반 (제목 + 내용 + 이미지)</option>
             <option value="okr" ${item.template === "okr" ? "selected" : ""}>OKR (시즌 · Objective · KR · KT)</option>
             <option value="metricAnalysis" ${item.template === "metricAnalysis" ? "selected" : ""}>지표 분석 (연결된 구글 시트에서 두 시점 비교)</option>
+            <option value="taskTracking" ${item.template === "taskTracking" ? "selected" : ""}>업무 트레킹 (지점별 지시 체크리스트 · 완료율 · 마감기한)</option>
           </select>
           <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">이미 등록된 게시물이 있는 상태에서 종류를 바꾸면 예전 글이 새 양식으로 안 보일 수 있어요.</p>
         </div>` : ""}
@@ -3950,6 +4158,7 @@ async function renderAdmin() {
             <option value="standard">일반 (제목 + 내용 + 이미지)</option>
             <option value="okr">OKR (시즌 · Objective · KR · KT)</option>
             <option value="metricAnalysis">지표 분석 (연결된 구글 시트에서 두 시점 비교)</option>
+            <option value="taskTracking">업무 트레킹 (지점별 지시 체크리스트 · 완료율 · 마감기한)</option>
           </select>
         </div>
         <button class="btn" type="submit" style="grid-column: span 2;">폴더 만들기</button>
