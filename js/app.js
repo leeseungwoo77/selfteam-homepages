@@ -2281,13 +2281,33 @@ function taskCompletionRate(task, branches) {
   if (!branches.length) return 0;
   return Math.round((taskDoneCount(task, branches) / branches.length) * 100);
 }
-function sortTasksForTracking(docs) {
-  return [...docs].sort((a, b) => {
-    if (a.deadline && b.deadline) { if (a.deadline !== b.deadline) return a.deadline < b.deadline ? -1 : 1; }
-    else if (a.deadline) return -1;
-    else if (b.deadline) return 1;
-    return (b.createdAt || "").localeCompare(a.createdAt || "");
+function sortTasksForTracking(docs, branches, sortState) {
+  const { column, dir } = sortState || { column: "deadline", dir: "asc" };
+  const factor = dir === "desc" ? -1 : 1;
+  const sorted = [...docs].sort((a, b) => {
+    let cmp = 0;
+    if (column === "title") {
+      cmp = (a.title || "").localeCompare(b.title || "", "ko");
+    } else if (column === "rate") {
+      cmp = taskCompletionRate(a, branches) - taskCompletionRate(b, branches);
+    } else { // deadline (기본값)
+      if (a.deadline && b.deadline) cmp = a.deadline < b.deadline ? -1 : (a.deadline > b.deadline ? 1 : 0);
+      else if (a.deadline) cmp = -1;
+      else if (b.deadline) cmp = 1;
+    }
+    if (cmp === 0) cmp = (b.createdAt || "").localeCompare(a.createdAt || "");
+    return cmp * factor;
   });
+  return sorted;
+}
+const taskSortState = {}; // section.key -> { column, dir }
+function getTaskSortState(sectionKey) {
+  return taskSortState[sectionKey] || { column: "deadline", dir: "asc" };
+}
+function sortArrow(sectionKey, column) {
+  const s = getTaskSortState(sectionKey);
+  if (s.column !== column) return `<span style="opacity:.25;">↕</span>`;
+  return s.dir === "asc" ? "↑" : "↓";
 }
 
 async function renderTaskTracking(section) {
@@ -2317,30 +2337,54 @@ function renderTaskStats(tasks, branches) {
   const avgRate = Math.round(tasks.reduce((sum, t) => sum + taskCompletionRate(t, branches), 0) / tasks.length);
   const overdueCount = tasks.filter(t => taskDdayInfo(t.deadline)?.tone === "overdue" && taskCompletionRate(t, branches) < 100).length;
   const doneCount = tasks.filter(t => taskCompletionRate(t, branches) === 100).length;
+
+  const branchRates = branches.map(b => {
+    const done = tasks.filter(t => t.branchDone && t.branchDone[b.id]).length;
+    const rate = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
+    return { branch: b, done, rate };
+  }).sort((a, b) => a.rate - b.rate); // 완료율이 낮은 지점을 먼저 보여줍니다.
+
   wrap.innerHTML = `<div class="stat-grid">
     <div class="stat-card"><div class="label">전체 업무</div><div class="value">${tasks.length}건</div></div>
     <div class="stat-card"><div class="label">지시 완료율(평균)</div><div class="value">${avgRate}%</div></div>
     <div class="stat-card"><div class="label">전 지점 완료</div><div class="value">${doneCount}건</div></div>
     <div class="stat-card"><div class="label">마감 지남(미완료)</div><div class="value" style="${overdueCount ? "color:#C0392B;" : ""}">${overdueCount}건</div></div>
+  </div>
+  <div class="card" style="margin-top:0;">
+    <h2 style="margin:0 0 12px;">지점별 지시 완료율</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;">
+      ${branchRates.map(({ branch, done, rate }) => `<div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+          <span style="font-weight:700;font-size:13.5px;">${escapeHtml(branch.name)}</span>
+          <span class="mono" style="font-size:12.5px;font-weight:700;color:${rate < 50 ? "#C0392B" : "var(--blue-deep)"};">${rate}%</span>
+        </div>
+        <div style="background:var(--bg-soft,#EEF1EA);border-radius:6px;height:8px;overflow:hidden;">
+          <div style="background:${rate === 100 ? "var(--green-bright)" : rate < 50 ? "#E8938C" : "var(--blue-bright)"};height:100%;width:${rate}%;"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">${done}/${tasks.length}건 완료</div>
+      </div>`).join("")}
+    </div>
   </div>`;
 }
 
 function renderTaskTrackingBody(section, docs) {
   const wrap = document.getElementById("taskGridWrap");
   const branches = [...state.branches];
-  const tasks = sortTasksForTracking(docs);
+  const sortState = getTaskSortState(section.key);
+  const tasks = sortTasksForTracking(docs, branches, sortState);
   renderTaskStats(tasks, branches);
 
   if (!branches.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다. "지점 · 팀원 관리"에서 지점을 먼저 추가해주세요.</div>`; return; }
   if (!tasks.length) { wrap.innerHTML = `<div class="empty-state">아직 등록된 업무가 없습니다.${canWriteSection(section) ? " 위에서 새 업무를 등록해보세요." : ""}</div>`; return; }
 
   const editableGlobally = canWriteSection(section);
+  const sortableTh = (col, label, extraStyle) => `<th data-sort-col="${col}" style="cursor:pointer;user-select:none;${extraStyle || ""}">${label} <span style="font-size:11px;">${sortArrow(section.key, col)}</span></th>`;
 
   let html = `<table style="min-width:${760 + branches.length * 90}px;"><thead><tr>
-    <th style="min-width:220px;">업무명</th>
-    <th style="min-width:110px;">마감기한</th>
+    ${sortableTh("title", "업무명", "min-width:220px;")}
+    ${sortableTh("deadline", "마감기한", "min-width:110px;")}
     ${branches.map(b => `<th style="text-align:center;min-width:80px;">${escapeHtml(b.name)}</th>`).join("")}
-    <th style="min-width:130px;">완료율</th>
+    ${sortableTh("rate", "완료율", "min-width:130px;")}
     ${editableGlobally ? `<th style="min-width:80px;">관리</th>` : ""}
   </tr></thead><tbody>`;
 
@@ -2381,6 +2425,16 @@ function renderTaskTrackingBody(section, docs) {
   html += `</tbody></table>`;
   wrap.innerHTML = html;
 
+  wrap.querySelectorAll("[data-sort-col]").forEach(th => {
+    th.onclick = () => {
+      const col = th.dataset.sortCol;
+      const cur = getTaskSortState(section.key);
+      taskSortState[section.key] = cur.column === col
+        ? { column: col, dir: cur.dir === "asc" ? "desc" : "asc" }
+        : { column: col, dir: "asc" };
+      renderTaskTrackingBody(section, tasks);
+    };
+  });
   wrap.querySelectorAll("[data-task-toggle]").forEach(chk => {
     chk.onchange = async () => {
       const taskId = chk.dataset.taskToggle;
