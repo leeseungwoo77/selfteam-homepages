@@ -2274,6 +2274,12 @@ const TASK_TONE_STYLE = {
   soon: "background:#FFF4DE;color:#B9770E;",
   normal: "background:#EEF3FA;color:var(--blue-deep);"
 };
+// 업무 트레킹 표에는 원장 지시 대상이 아닌 지점(본사)과, 아직 업무 지시 대상에서 제외한 지점(진학중계)은
+// 표시하지 않습니다. 완료율·통계도 자동으로 이 지점들을 뺀 나머지 지점 기준으로만 계산됩니다.
+const TASK_TRACKING_EXCLUDED_BRANCHES = ["본사", "진학중계"];
+function taskTrackingBranches() {
+  return state.branches.filter(b => !TASK_TRACKING_EXCLUDED_BRANCHES.includes(b.name));
+}
 function taskDoneCount(task, branches) {
   const map = task.branchDone || {};
   return branches.reduce((n, b) => n + (map[b.id] ? 1 : 0), 0);
@@ -2370,7 +2376,7 @@ function renderTaskStats(tasks, branches) {
 
 function renderTaskTrackingBody(section, docs) {
   const wrap = document.getElementById("taskGridWrap");
-  const branches = [...state.branches];
+  const branches = taskTrackingBranches();
   const sortState = getTaskSortState(section.key);
   const tasks = sortTasksForTracking(docs, branches, sortState);
   renderTaskStats(tasks, branches);
