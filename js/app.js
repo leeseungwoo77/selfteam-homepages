@@ -117,7 +117,7 @@ const COLOR_HEX = { blue:"var(--blue-bright)", green:"var(--green-bright)", mage
 const GOOGLE_CLIENT_ID = "708745145673-j0ljnhqsl7gg0djq5p9j7uop040thqbe.apps.googleusercontent.com";
 const GOOGLE_SCOPES = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.readonly";
 const LOCATION_COLORS = {
-  "에듀": "#E03C3C", "에듀본사": "#E03C3C", "상상": "#F5A623", "전능": "#2979FF", "전농": "#2979FF",
+  "에듀": "#E03C3C", "에듀본사": "#E03C3C", "상상": "#F5A623", "진학": "#2979FF",
   "돈암": "#00C853", "행당": "#D3339C", "별내": "#FFD600", "다산": "#8E1E1E"
 };
 // 배경색이 밝아서 흰 글씨는 잘 안 보이는 지점은 검정 글씨로 표시합니다.
@@ -195,7 +195,7 @@ function generateTimeSlots() {
   return slots; // 10:00 ~ 21:30, 30분 단위
 }
 const SCHEDULE_TIME_SLOTS = generateTimeSlots();
-const SCHEDULE_NOTE_ROWS = ["에듀본사", "상상", "전농", "돈암", "행당", "별내", "다산"];
+const SCHEDULE_NOTE_ROWS = ["에듀본사", "상상", "진학", "돈암", "행당", "별내", "다산"];
 const SCHEDULE_ROW_ORDER = ["location", ...SCHEDULE_NOTE_ROWS.map(l => "note_" + l), ...SCHEDULE_TIME_SLOTS.map(s => "time_" + s)];
 
 const scheduleViewState = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
@@ -204,6 +204,7 @@ function scheduleRowKey(kind) { return kind; } // "location" | "note_에듀본�
 
 const SCHEDULE_KEYWORD_RULES = [
   { word: "연차", bg: "#000000", color: "#fff" },
+  { word: "반차", bg: "#E5E5E5", color: "#000" },
   { word: "회의", bg: "#E8938C", color: "#fff" },
   { word: "식사", bg: "#BFBFBF", color: "#000" },
   { word: "생일", bg: "#8E44AD", color: "#fff" },
@@ -4302,6 +4303,7 @@ async function renderAdmin() {
         ${u.role !== "leader" ? `<button class="icon-btn" data-role-btn="leader" data-uid="${u.id}">팀장 권한 부여</button>` : ""}
         ${u.role !== "viewer" ? `<button class="icon-btn" data-role-btn="viewer" data-uid="${u.id}">전체 열람 권한 부여</button>` : ""}
         ${u.role !== "member" ? `<button class="icon-btn" data-role-btn="member" data-uid="${u.id}">일반 팀원으로</button>` : ""}
+        ${u.id !== state.user.uid ? `<button class="icon-btn danger" data-withdraw-uid="${u.id}" data-withdraw-name="${escapeHtml(u.name || u.email || "이 사용자")}">탈퇴</button>` : ""}
       </td>
     </tr>`).join("")}
   </tbody></table>`;
@@ -4313,6 +4315,19 @@ async function renderAdmin() {
       await updateDoc(doc(db, "users", btn.dataset.uid), { role: target });
       showToast("권한이 변경되었습니다.");
       renderAdmin();
+    };
+  });
+  userWrap.querySelectorAll("[data-withdraw-uid]").forEach(btn => {
+    btn.onclick = async () => {
+      const name = btn.dataset.withdrawName;
+      if (!confirm(`${name} 님을 탈퇴 처리할까요?\n계정 프로필과 사이트 접근 권한이 즉시 삭제됩니다. (이 작업은 되돌릴 수 없습니다)\n\n※ 로그인 자체를 완전히 막으려면 Firebase 콘솔 > Authentication에서 해당 계정을 별도로 삭제해주세요.`)) return;
+      try {
+        await deleteDoc(doc(db, "users", btn.dataset.withdrawUid));
+        showToast("탈퇴 처리되었습니다.");
+        renderAdmin();
+      } catch (err) {
+        alert("탈퇴 처리 중 오류: " + err.message);
+      }
     };
   });
 }
