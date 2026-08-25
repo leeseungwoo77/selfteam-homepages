@@ -286,6 +286,15 @@ td.actions { white-space: nowrap; text-align: right; }
 .modal { background: #fff; border-radius: 16px; padding: 28px; width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto; }
 .modal h3 { margin: 0 0 18px; font-size: 16px; }
 
+/* 뒤에 있는 화면(예: 지표 표)을 계속 보면서 옆에서 바로 기록할 수 있도록, 전체를 가리지 않는 옆쪽 서랍형 패널입니다. */
+.side-drawer {
+  position: fixed; top: 0; right: 0; height: 100vh; width: min(420px, 92vw);
+  background: #fff; box-shadow: -10px 0 34px rgba(20,30,15,0.20); border-left: 1px solid var(--border);
+  padding: 24px; overflow-y: auto; z-index: 50; animation: sideDrawerIn .16s ease;
+}
+@keyframes sideDrawerIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.side-drawer h3 { margin: 0; font-size: 16px; }
+
 .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text-main); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 13px; z-index: 80; }
 
 /* ---------- 팀 회의 일지 카드 ---------- */

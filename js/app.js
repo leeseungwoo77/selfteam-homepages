@@ -3111,9 +3111,12 @@ async function renderMetricAnalysis(section) {
     function openMetricNoteModal(existing, prefill) {
       const root = document.getElementById("modalRoot");
       const cur = existing || prefill || {};
-      root.innerHTML = `<div class="modal-bg" id="modalBg">
-        <div class="modal">
-          <h3>${existing ? "분석 기록 수정" : "새 분석 기록"}</h3>
+      // 지표 표를 계속 보면서 기록할 수 있도록, 화면 전체를 가리는 팝업 대신 오른쪽에 붙는 서랍형 패널로 엽니다.
+      root.innerHTML = `<div class="side-drawer" id="noteDrawer">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+            <h3>${existing ? "분석 기록 수정" : "새 분석 기록"}</h3>
+            <button type="button" class="icon-btn" id="closeNoteDrawerBtn" style="font-size:20px;line-height:1;">×</button>
+          </div>
           <form id="metricNoteForm">
             <div class="grid-2">
               <div class="field"><label>지점</label><select id="noteBranch">${noteBranchOptions.map(t => `<option value="${escapeHtml(t)}" ${cur.branchLabel === t ? "selected" : ""}>${escapeHtml(t)}</option>`).join("")}</select></div>
@@ -3127,9 +3130,10 @@ async function renderMetricAnalysis(section) {
               <button type="submit" class="btn" id="saveNoteBtn">저장</button>
             </div>
           </form>
-        </div></div>`;
-      document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
-      document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+        </div>`;
+      const closeDrawer = () => { root.innerHTML = ""; };
+      document.getElementById("cancelBtn").onclick = closeDrawer;
+      document.getElementById("closeNoteDrawerBtn").onclick = closeDrawer;
       document.getElementById("metricNoteForm").addEventListener("submit", async (e) => {
         e.preventDefault();
         const branchLabel = document.getElementById("noteBranch").value;
