@@ -2841,11 +2841,16 @@ async function renderMetricAnalysis(section) {
 
     <div class="card" id="metricYoyCard" style="display:none;">
       <h2>전년 대비 증감률 (전체 지표)</h2>
-      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지표를 하나하나 고를 필요 없이, 지점·연도·월만 고르면 모든 지표를 작년 같은 달과 한 번에 비교해요.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지표를 하나하나 고를 필요 없이, 지점·연도·월만 고르면 모든 지표를 같은 달 기준으로 한 번에 비교해요.</p>
       <div class="grid-3" style="align-items:end;">
         <div class="field" style="margin:0;"><label>지점</label><select id="yoyBranch"></select></div>
         <div class="field" style="margin:0;"><label>연도 (올해)</label><select id="yoyYear"></select></div>
         <div class="field" style="margin:0;"><label>월</label><select id="yoyMonth"></select></div>
+      </div>
+      <div style="display:flex;gap:16px;align-items:center;margin:12px 0 4px;flex-wrap:wrap;">
+        <span style="font-size:12.5px;font-weight:700;">비교 연도 수:</span>
+        <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="yoyYearsMode" value="2" checked> 2개년 (전년 대비)</label>
+        <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="yoyYearsMode" value="3"> 3개년</label>
       </div>
       <button class="btn" id="yoyRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">비교하기</button>
     </div>
@@ -3310,6 +3315,7 @@ async function renderMetricAnalysis(section) {
       const branch = document.getElementById("yoyBranch").value;
       const year = document.getElementById("yoyYear").value;
       const month = document.getElementById("yoyMonth").value;
+      const yearsMode = document.querySelector('input[name="yoyYearsMode"]:checked').value; // "2" 또는 "3"
       const prevYear = prevYearLabel(year);
       resultWrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
       try {
@@ -3318,15 +3324,26 @@ async function renderMetricAnalysis(section) {
           resultWrap.innerHTML = `<div class="empty-state">${escapeHtml(prevYear || "작년")} 데이터가 시트에 없어서 비교할 수 없어요.</div>`;
           return;
         }
-        const results = parsed.metricOrder.map(name => {
-          const valA = aggregateMetric(parsed, name, prevYear, [month], "avg");
-          const valB = aggregateMetric(parsed, name, year, [month], "avg");
-          const diff = (valA !== null && valB !== null) ? valB - valA : null;
-          const pct = (diff !== null && valA) ? (diff / Math.abs(valA)) * 100 : null;
-          return [name, fmtMetricNum(valA), fmtMetricNum(valB), diff, pct];
+        // 3개년을 골랐어도, 재작년(2년 전) 데이터가 시트에 없으면 2개년 비교로 자동으로 낮춰서 보여줍니다.
+        let yearLabels = [prevYear, year];
+        let fallbackNote = "";
+        if (yearsMode === "3") {
+          const prevYear2 = prevYearLabel(prevYear);
+          if (prevYear2 && parsed.years.includes(prevYear2)) {
+            yearLabels = [prevYear2, prevYear, year];
+          } else {
+            fallbackNote = `<p style="font-size:11.5px;color:var(--text-muted);margin:0 0 10px;">${escapeHtml(prevYear2 || "재작년")} 데이터가 시트에 없어서 2개년만 표시했어요.</p>`;
+          }
+        }
+        const rows = parsed.metricOrder.map(name => {
+          const values = yearLabels.map(y => aggregateMetric(parsed, name, y, [month], "avg"));
+          const first = values[0], last = values[values.length - 1];
+          const diff = (first !== null && last !== null) ? last - first : null;
+          const pct = (diff !== null && first) ? (diff / Math.abs(first)) * 100 : null;
+          return { name, values: values.map(fmtMetricNum), diff, pct };
         });
         resultWrap.innerHTML = `<p style="font-size:12.5px;color:var(--text-muted);margin:0 0 12px;"><strong>${escapeHtml(branch)}</strong> · ${escapeHtml(month)} 기준</p>` +
-          renderDiffTable(["지표", `${escapeHtml(prevYear)}`, `${escapeHtml(year)}`, "증감", "증감율"], results);
+          fallbackNote + renderYoyDiffTable(yearLabels, rows);
       } catch (err) {
         resultWrap.innerHTML = `<div class="empty-state">비교 중 오류: ${escapeHtml(err.message)}</div>`;
       }
@@ -3452,6 +3469,25 @@ async function renderMetricAnalysis(section) {
           <td>${valBtext}</td>
           <td class="mono" style="color:${tone};font-weight:700;">${diff !== null ? `${arrow} ${fmtMetricNum(Math.abs(diff))}` : "-"}</td>
           <td class="mono" style="color:${tone};font-weight:700;">${pct !== null ? `${arrow} ${Math.abs(pct).toFixed(1)}%` : "-"}</td>
+        </tr>`;
+      }).join("")}
+    </tbody></table>`;
+  }
+
+  // YoY 비교용: 연도가 2개(전년 대비)든 3개(3개년)든 그대로 열을 늘려서 보여주고,
+  // 증감·증감율은 맨 처음 연도 대비 맨 마지막(올해) 연도 기준으로 계산합니다.
+  function renderYoyDiffTable(yearLabels, rows) {
+    const headers = ["지표", ...yearLabels, "증감", "증감율"];
+    return `<table><thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>
+      ${rows.map(r => {
+        const up = r.diff !== null && r.diff > 0, down = r.diff !== null && r.diff < 0;
+        const arrow = up ? "▲" : down ? "▼" : "-";
+        const tone = up ? "#E03C3C" : down ? "#2979FF" : "var(--text-muted)";
+        return `<tr>
+          <td style="font-weight:700;">${escapeHtml(r.name)}</td>
+          ${r.values.map(v => `<td>${v}</td>`).join("")}
+          <td class="mono" style="color:${tone};font-weight:700;">${r.diff !== null ? `${arrow} ${fmtMetricNum(Math.abs(r.diff))}` : "-"}</td>
+          <td class="mono" style="color:${tone};font-weight:700;">${r.pct !== null ? `${arrow} ${Math.abs(r.pct).toFixed(1)}%` : "-"}</td>
         </tr>`;
       }).join("")}
     </tbody></table>`;
