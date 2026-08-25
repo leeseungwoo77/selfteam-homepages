@@ -2768,6 +2768,7 @@ async function renderMetricAnalysis(section) {
       <p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">각 탭은 A열=지표명, B열=연도, C열부터 1~12월 값 형식이어야 해요.</p>
     </div>` : (!folder?.sheetFileName ? `<div class="card"><div class="empty-state">아직 팀장이 연결한 파일이 없습니다.</div></div>` : "")}
     <div id="metricModeToggle" style="display:none;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+      <button class="btn small secondary" id="modeNoteBtn" type="button">분석 기록</button>
       <button class="btn small" id="modeDashBtn" type="button">요약 대시보드</button>
       <button class="btn small secondary" id="modeTrendBtn" type="button">시간 추이 그래프</button>
       <button class="btn small secondary" id="modeTwoBtn" type="button">두 기준 비교</button>
@@ -2775,7 +2776,6 @@ async function renderMetricAnalysis(section) {
       <button class="btn small secondary" id="modeYoyBtn" type="button">전년 대비 증감률(YoY)</button>
       ${canViewAllRole() ? `<button class="btn small secondary" id="modeRankBtn" type="button">지점 순위</button>` : ""}
       <button class="btn small secondary" id="modeAnomalyBtn" type="button">이상치 탐지</button>
-      <button class="btn small secondary" id="modeNoteBtn" type="button">분석 기록</button>
     </div>
 
     <div class="card" id="metricDashboardCard" style="display:none;">
