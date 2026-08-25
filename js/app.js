@@ -3136,7 +3136,12 @@ async function renderMetricAnalysis(section) {
             </div>
           </form>
         </div>`;
-      const closeDrawer = () => { root.innerHTML = ""; };
+      // 서랍이 열려 있는 동안, 뒤에 있는 화면을 좌우로 스크롤해서 서랍에 가려진 부분을 볼 수 있게 여유 폭을 줍니다.
+      document.getElementById("mainContent").classList.add("with-side-drawer");
+      const closeDrawer = () => {
+        document.getElementById("mainContent").classList.remove("with-side-drawer");
+        root.innerHTML = "";
+      };
       document.getElementById("cancelBtn").onclick = closeDrawer;
       document.getElementById("closeNoteDrawerBtn").onclick = closeDrawer;
       document.getElementById("metricNoteForm").addEventListener("submit", async (e) => {
@@ -3158,7 +3163,7 @@ async function renderMetricAnalysis(section) {
               createdAt: new Date().toISOString(), createdBy: state.profile.name, createdByUid: state.user.uid
             });
           }
-          root.innerHTML = "";
+          closeDrawer();
           showToast("저장되었습니다.");
           setCompareMode("note");
           loadAndRenderMetricNotes();

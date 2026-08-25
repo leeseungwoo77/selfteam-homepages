@@ -294,6 +294,8 @@ td.actions { white-space: nowrap; text-align: right; }
 }
 @keyframes sideDrawerIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
 .side-drawer h3 { margin: 0; font-size: 16px; }
+/* 서랍이 열려 있는 동안, 뒤 화면 오른쪽 끝(서랍에 가려지는 부분)을 좌우로 스크롤해서 볼 수 있게 여유 폭을 만들어줍니다. */
+.main-scroll.with-side-drawer { overflow-x: auto; padding-right: 460px; }
 
 .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text-main); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 13px; z-index: 80; }
 
