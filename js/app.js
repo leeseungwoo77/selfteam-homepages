@@ -2775,6 +2775,7 @@ async function renderMetricAnalysis(section) {
       <button class="btn small secondary" id="modeYoyBtn" type="button">전년 대비 증감률(YoY)</button>
       ${canViewAllRole() ? `<button class="btn small secondary" id="modeRankBtn" type="button">지점 순위</button>` : ""}
       <button class="btn small secondary" id="modeAnomalyBtn" type="button">이상치 탐지</button>
+      <button class="btn small secondary" id="modeNoteBtn" type="button">분석 기록</button>
     </div>
 
     <div class="card" id="metricDashboardCard" style="display:none;">
@@ -2786,6 +2787,7 @@ async function renderMetricAnalysis(section) {
         <div class="field" style="margin:0;"><label>월</label><select id="dashMonth"></select></div>
       </div>
       <button class="btn" id="dashRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">보기</button>
+      ${canWriteSection(section) ? `<button class="btn small secondary" id="dashNoteBtn" type="button" style="width:auto;padding:10px 18px;margin-top:12px;margin-left:8px;">이 조건으로 기록 남기기</button>` : ""}
       <div id="metricDashboardWrap" style="margin-top:18px;"></div>
     </div>
 
@@ -2883,6 +2885,17 @@ async function renderMetricAnalysis(section) {
       <button class="btn" id="anomalyRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">찾기</button>
     </div>
 
+    <div class="card" id="metricNoteCard" style="display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
+        <div>
+          <h2 style="margin-bottom:2px;">분석 기록</h2>
+          <p style="font-size:12px;color:var(--text-muted);margin:0;">지표를 보다가 눈에 띈 내용이나 원장님과 나눠야 할 이야기를 지점·시점별로 남겨두는 공간입니다.</p>
+        </div>
+        ${canWriteSection(section) ? `<button class="btn small" id="addMetricNoteBtn" type="button">+ 새 기록 남기기</button>` : ""}
+      </div>
+      <div id="metricNotesWrap" style="margin-top:14px;">불러오는 중...</div>
+    </div>
+
     <div class="card" style="overflow:auto;"><div id="metricResultWrap"></div></div>`;
 
   let sheetData = null;
@@ -2944,10 +2957,11 @@ async function renderMetricAnalysis(section) {
   }
 
   let tabNamesG = [], firstParsedG = null;
+  let loadAndRenderMetricNotesG = null; // initAllViews 안에서 정의되므로, 밖에 있는 "분석 기록" 탭 버튼이 참조할 수 있게 여기에 담아둡니다.
 
   function setCompareMode(mode) {
-    const cards = { dash: "metricDashboardCard", trend: "metricTrendCard", two: "metricCompareCard", all: "metricAllCard", yoy: "metricYoyCard", rank: "metricRankCard", anomaly: "metricAnomalyCard" };
-    const btns = { dash: "modeDashBtn", trend: "modeTrendBtn", two: "modeTwoBtn", all: "modeAllBtn", yoy: "modeYoyBtn", rank: "modeRankBtn", anomaly: "modeAnomalyBtn" };
+    const cards = { dash: "metricDashboardCard", trend: "metricTrendCard", two: "metricCompareCard", all: "metricAllCard", yoy: "metricYoyCard", rank: "metricRankCard", anomaly: "metricAnomalyCard", note: "metricNoteCard" };
+    const btns = { dash: "modeDashBtn", trend: "modeTrendBtn", two: "modeTwoBtn", all: "modeAllBtn", yoy: "modeYoyBtn", rank: "modeRankBtn", anomaly: "modeAnomalyBtn", note: "modeNoteBtn" };
     Object.keys(cards).forEach(k => {
       const cardEl = document.getElementById(cards[k]);
       const btnEl = document.getElementById(btns[k]);
@@ -2955,7 +2969,7 @@ async function renderMetricAnalysis(section) {
       cardEl.style.display = k === mode ? "block" : "none";
       btnEl.className = k === mode ? "btn small" : "btn small secondary";
     });
-    document.getElementById("metricResultWrap").innerHTML = "";
+    if (mode !== "note") document.getElementById("metricResultWrap").innerHTML = "";
   }
   document.getElementById("modeDashBtn").onclick = () => setCompareMode("dash");
   document.getElementById("modeTrendBtn").onclick = () => setCompareMode("trend");
@@ -2964,6 +2978,7 @@ async function renderMetricAnalysis(section) {
   document.getElementById("modeYoyBtn").onclick = () => setCompareMode("yoy");
   if (document.getElementById("modeRankBtn")) document.getElementById("modeRankBtn").onclick = () => setCompareMode("rank");
   document.getElementById("modeAnomalyBtn").onclick = () => setCompareMode("anomaly");
+  document.getElementById("modeNoteBtn").onclick = () => { setCompareMode("note"); if (loadAndRenderMetricNotesG) loadAndRenderMetricNotesG(); };
 
   async function initAllViews(tabNames, firstParsed, spreadsheetId) {
     tabNamesG = tabNames; firstParsedG = firstParsed;
@@ -3035,6 +3050,126 @@ async function renderMetricAnalysis(section) {
 
     document.getElementById("metricModeToggle").style.display = "flex";
     setCompareMode("dash");
+
+    // ---------- 분석 기록 ----------
+    // "전체"(팀 전체 기준) 기록은 팀장/뷰어만 남길 수 있고, 원장님(팀원)은 자기 지점 기록만 남기고 볼 수 있습니다.
+    const noteBranchOptions = canViewAllRole() ? ["전체", ...branchOptionsFor(tabNames)] : branchOptionsFor(tabNames);
+    function canEditMetricNote(n) {
+      if (state.profile.role === "leader") return true;
+      if (state.profile.role === "viewer") return false;
+      return canWriteSection(section) && n.createdByUid === state.user.uid;
+    }
+    function renderMetricNotesList(notes) {
+      const wrap = document.getElementById("metricNotesWrap");
+      if (!wrap) return;
+      if (!notes.length) { wrap.innerHTML = `<div class="empty-state">아직 남긴 분석 기록이 없습니다.</div>`; return; }
+      wrap.innerHTML = notes.map(n => `<div class="card" style="margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <span class="pill normal">${escapeHtml(n.branchLabel || "전체")}</span>
+            <span style="font-weight:700;font-size:13px;">${escapeHtml(n.year || "")}${n.month ? " " + escapeHtml(n.month) : ""}</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--text-muted);">${escapeHtml(n.createdBy || "")} · ${escapeHtml((n.createdAt || "").slice(0, 16).replace("T", " "))}</div>
+        </div>
+        <p style="white-space:pre-wrap;margin:10px 0 0;font-size:13.5px;line-height:1.6;">${escapeHtml(n.content || "")}</p>
+        ${n.followUp ? `<div style="margin-top:10px;padding:10px 12px;background:#F4FAEF;border-radius:8px;font-size:12.5px;"><strong>후속조치</strong><div style="white-space:pre-wrap;margin-top:4px;">${escapeHtml(n.followUp)}</div></div>` : ""}
+        ${canEditMetricNote(n) ? `<div style="margin-top:10px;text-align:right;"><button class="icon-btn" data-edit-note="${n.id}">수정</button><button class="icon-btn danger" data-del-note="${n.id}">삭제</button></div>` : ""}
+      </div>`).join("");
+      wrap.querySelectorAll("[data-edit-note]").forEach(btn => {
+        btn.onclick = () => openMetricNoteModal(notes.find(n => n.id === btn.dataset.editNote));
+      });
+      wrap.querySelectorAll("[data-del-note]").forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm("이 기록을 삭제할까요?")) return;
+          try {
+            await deleteDoc(doc(db, "metricAnalysisNotes", btn.dataset.delNote));
+            showToast("삭제되었습니다.");
+            loadAndRenderMetricNotes();
+          } catch (err) {
+            alert("삭제 중 오류: " + err.message);
+          }
+        };
+      });
+    }
+    async function loadAndRenderMetricNotes() {
+      const wrap = document.getElementById("metricNotesWrap");
+      if (!wrap) return;
+      wrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
+      try {
+        const notesQuery = query(collection(db, "metricAnalysisNotes"), where("folderId", "==", section.folderId));
+        const snap = await getDocs(notesQuery);
+        let notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (!canViewAllRole()) {
+          notes = notes.filter(n => n.branchLabel === "전체" || n.branchLabel === state.profile.branchName);
+        }
+        notes.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+        renderMetricNotesList(notes);
+      } catch (err) {
+        wrap.innerHTML = `<div class="empty-state">불러오는 중 오류: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+    function openMetricNoteModal(existing, prefill) {
+      const root = document.getElementById("modalRoot");
+      const cur = existing || prefill || {};
+      root.innerHTML = `<div class="modal-bg" id="modalBg">
+        <div class="modal">
+          <h3>${existing ? "분석 기록 수정" : "새 분석 기록"}</h3>
+          <form id="metricNoteForm">
+            <div class="grid-2">
+              <div class="field"><label>지점</label><select id="noteBranch">${noteBranchOptions.map(t => `<option value="${escapeHtml(t)}" ${cur.branchLabel === t ? "selected" : ""}>${escapeHtml(t)}</option>`).join("")}</select></div>
+              <div class="field"><label>연도</label><select id="noteYear">${years.map(y => `<option value="${escapeHtml(y)}" ${cur.year === y ? "selected" : ""}>${escapeHtml(y)}</option>`).join("")}</select></div>
+            </div>
+            <div class="field"><label>월 (선택 안 함 가능)</label><select id="noteMonth"><option value="">해당 없음</option>${months.map(m => `<option value="${escapeHtml(m)}" ${cur.month === m ? "selected" : ""}>${escapeHtml(m)}</option>`).join("")}</select></div>
+            <div class="field"><label>분석 내용</label><textarea id="noteContent" rows="4" required placeholder="예: 다산점 상담 이탈율이 전월 대비 3%p 상승. 신규 상담 프로세스 점검 필요.">${escapeHtml(cur.content || "")}</textarea></div>
+            <div class="field"><label>후속조치 (선택)</label><textarea id="noteFollowUp" rows="2" placeholder="예: 다음 원장 미팅 때 상담 프로세스 재점검 안건으로 올리기">${escapeHtml(cur.followUp || "")}</textarea></div>
+            <div class="grid-2" style="margin-top:10px;">
+              <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+              <button type="submit" class="btn" id="saveNoteBtn">저장</button>
+            </div>
+          </form>
+        </div></div>`;
+      document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+      document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+      document.getElementById("metricNoteForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const branchLabel = document.getElementById("noteBranch").value;
+        const year = document.getElementById("noteYear").value;
+        const month = document.getElementById("noteMonth").value;
+        const content = document.getElementById("noteContent").value.trim();
+        const followUp = document.getElementById("noteFollowUp").value.trim();
+        if (!content) return;
+        const saveBtn = document.getElementById("saveNoteBtn");
+        saveBtn.disabled = true;
+        try {
+          if (existing) {
+            await updateDoc(doc(db, "metricAnalysisNotes", existing.id), { branchLabel, year, month, content, followUp });
+          } else {
+            await addDoc(collection(db, "metricAnalysisNotes"), {
+              folderId: section.folderId, branchLabel, year, month, content, followUp,
+              createdAt: new Date().toISOString(), createdBy: state.profile.name, createdByUid: state.user.uid
+            });
+          }
+          root.innerHTML = "";
+          showToast("저장되었습니다.");
+          setCompareMode("note");
+          loadAndRenderMetricNotes();
+        } catch (err) {
+          saveBtn.disabled = false;
+          alert("저장 중 오류가 발생했습니다: " + err.message);
+        }
+      });
+    }
+    loadAndRenderMetricNotesG = loadAndRenderMetricNotes;
+    if (document.getElementById("addMetricNoteBtn")) {
+      document.getElementById("addMetricNoteBtn").onclick = () => openMetricNoteModal(null);
+    }
+    if (document.getElementById("dashNoteBtn")) {
+      document.getElementById("dashNoteBtn").onclick = () => openMetricNoteModal(null, {
+        branchLabel: document.getElementById("dashBranch").value,
+        year: document.getElementById("dashYear").value,
+        month: document.getElementById("dashMonth").value
+      });
+    }
 
     // ---------- 대시보드 실행 ----------
     document.getElementById("dashRunBtn").onclick = async () => {
