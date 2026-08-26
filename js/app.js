@@ -2787,7 +2787,7 @@ async function renderMetricAnalysis(section) {
         <div class="field" style="margin:0;"><label>월</label><select id="dashMonth"></select></div>
       </div>
       <button class="btn" id="dashRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">보기</button>
-      ${canWriteSection(section) ? `<button class="btn small secondary" id="dashNoteBtn" type="button" style="width:auto;padding:10px 18px;margin-top:12px;margin-left:8px;">이 조건으로 기록 남기기</button>` : ""}
+      ${canWriteSection(section) ? `<button class="btn small secondary" id="dashNoteBtn" type="button" style="width:auto;padding:10px 18px;margin-top:12px;margin-left:8px;">기록</button>` : ""}
       <div id="metricDashboardWrap" style="margin-top:18px;"></div>
     </div>
 
@@ -2802,6 +2802,7 @@ async function renderMetricAnalysis(section) {
         </div>
       </div>
       <button class="btn" id="trendRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">그래프 보기</button>
+      ${canWriteSection(section) ? `<button class="btn small secondary" id="trendNoteBtn" type="button" style="width:auto;padding:10px 18px;margin-top:12px;margin-left:8px;">기록</button>` : ""}
       <div id="metricTrendWrap" style="margin-top:18px;overflow-x:auto;"></div>
     </div>
 
@@ -2816,6 +2817,7 @@ async function renderMetricAnalysis(section) {
         <div style="font-size:12.5px;font-weight:700;">여러 달을 골랐을 때:</div>
         <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="metricAggMode" value="avg" checked> 평균</label>
         <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="metricAggMode" value="sum"> 합계</label>
+        ${canWriteSection(section) ? `<button class="btn small secondary" id="twoNoteBtn" type="button">기록</button>` : ""}
         <button class="btn" id="metricCompareBtn" type="button" style="width:auto;padding:10px 24px;margin-left:auto;">비교하기</button>
       </div>
     </div>
@@ -2835,6 +2837,7 @@ async function renderMetricAnalysis(section) {
         <div style="font-size:12.5px;font-weight:700;">여러 달을 골랐을 때:</div>
         <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="metricAllAggMode" value="avg" checked> 평균</label>
         <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="metricAllAggMode" value="sum"> 합계</label>
+        ${canWriteSection(section) ? `<button class="btn small secondary" id="allNoteBtn" type="button">기록</button>` : ""}
         <button class="btn" id="metricAllCompareBtn" type="button" style="width:auto;padding:10px 24px;margin-left:auto;">비교하기</button>
       </div>
     </div>
@@ -2853,6 +2856,7 @@ async function renderMetricAnalysis(section) {
         <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="yoyYearsMode" value="3"> 3개년</label>
       </div>
       <button class="btn" id="yoyRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">비교하기</button>
+      ${canWriteSection(section) ? `<button class="btn small secondary" id="yoyNoteBtn" type="button" style="width:auto;padding:10px 18px;margin-top:12px;margin-left:8px;">기록</button>` : ""}
     </div>
 
     <div class="card" id="metricRankCard" style="display:none;">
@@ -2871,6 +2875,7 @@ async function renderMetricAnalysis(section) {
       </div>
       <div id="rankMetricsHolder" style="margin-top:14px;"></div>
       <button class="btn" id="rankRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">순위 계산하기</button>
+      ${canWriteSection(section) ? `<button class="btn small secondary" id="rankNoteBtn" type="button" style="width:auto;padding:10px 18px;margin-top:12px;margin-left:8px;">기록</button>` : ""}
     </div>
 
     <div class="card" id="metricAnomalyCard" style="display:none;">
@@ -2888,6 +2893,7 @@ async function renderMetricAnalysis(section) {
         </div>
       </div>
       <button class="btn" id="anomalyRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">찾기</button>
+      ${canWriteSection(section) ? `<button class="btn small secondary" id="anomalyNoteBtn" type="button" style="width:auto;padding:10px 18px;margin-top:12px;margin-left:8px;">기록</button>` : ""}
     </div>
 
     <div class="card" id="metricNoteCard" style="display:none;">
@@ -3185,6 +3191,46 @@ async function renderMetricAnalysis(section) {
         year: document.getElementById("dashYear").value,
         month: document.getElementById("dashMonth").value
       });
+    }
+    // 지금 보고 있는 화면의 지점·연도·월(고를 수 있는 경우)을 그대로 채워서 "기록" 창을 엽니다.
+    if (document.getElementById("trendNoteBtn")) {
+      document.getElementById("trendNoteBtn").onclick = () => openMetricNoteModal(null, {
+        branchLabel: document.querySelector(".trendBranchChk:checked")?.value || ""
+      });
+    }
+    if (document.getElementById("twoNoteBtn")) {
+      document.getElementById("twoNoteBtn").onclick = () => openMetricNoteModal(null, {
+        branchLabel: document.getElementById("gABranch")?.value || "",
+        year: document.getElementById("gAYear")?.value || "",
+        month: document.querySelector(".gAMonthChk:checked")?.value || ""
+      });
+    }
+    if (document.getElementById("allNoteBtn")) {
+      document.getElementById("allNoteBtn").onclick = () => openMetricNoteModal(null, {
+        branchLabel: "전체",
+        year: document.getElementById("allYearSelect")?.value || "",
+        month: document.querySelector(".allMonthChk:checked")?.value || ""
+      });
+    }
+    if (document.getElementById("yoyNoteBtn")) {
+      document.getElementById("yoyNoteBtn").onclick = () => openMetricNoteModal(null, {
+        branchLabel: document.getElementById("yoyBranch")?.value || "",
+        year: document.getElementById("yoyYear")?.value || "",
+        month: document.getElementById("yoyMonth")?.value || ""
+      });
+    }
+    if (document.getElementById("rankNoteBtn")) {
+      document.getElementById("rankNoteBtn").onclick = () => openMetricNoteModal(null, {
+        branchLabel: "전체",
+        year: document.getElementById("rankYear")?.value || "",
+        month: document.querySelector(".rankMonthChk:checked")?.value || ""
+      });
+    }
+    if (document.getElementById("anomalyNoteBtn")) {
+      document.getElementById("anomalyNoteBtn").onclick = () => {
+        const b = document.getElementById("anomalyBranch")?.value || "";
+        openMetricNoteModal(null, { branchLabel: b === "__all__" ? "전체" : b });
+      };
     }
 
     // ---------- 대시보드 실행 ----------
