@@ -2768,8 +2768,8 @@ async function renderMetricAnalysis(section) {
       <p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">각 탭은 A열=지표명, B열=연도, C열부터 1~12월 값 형식이어야 해요.</p>
     </div>` : (!folder?.sheetFileName ? `<div class="card"><div class="empty-state">아직 팀장이 연결한 파일이 없습니다.</div></div>` : "")}
     <div id="metricModeToggle" style="display:none;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
-      <button class="btn small secondary" id="modeNoteBtn" type="button">분석 기록</button>
-      <button class="btn small" id="modeDashBtn" type="button">요약 대시보드</button>
+      <button class="btn small secondary" id="modeNoteBtn" type="button" style="background:var(--magenta-deep);">지표 분석</button>
+      <button class="btn small secondary" id="modeDashBtn" type="button">요약 대시보드</button>
       <button class="btn small secondary" id="modeTrendBtn" type="button">시간 추이 그래프</button>
       <button class="btn small secondary" id="modeTwoBtn" type="button">두 기준 비교</button>
       ${canViewAllRole() ? `<button class="btn small secondary" id="modeAllBtn" type="button">지표별 전체 지점 비교</button>` : ""}
@@ -2972,7 +2972,9 @@ async function renderMetricAnalysis(section) {
       const btnEl = document.getElementById(btns[k]);
       if (!cardEl || !btnEl) return; // 지점 순위처럼 권한이 없어 버튼/카드 자체가 안 그려진 경우
       cardEl.style.display = k === mode ? "block" : "none";
-      btnEl.className = k === mode ? "btn small" : "btn small secondary";
+      // 요약 대시보드는 선택 여부와 상관없이 다른 탭들과 같은 회색으로 두고, 나머지 탭만 선택되면 파란색으로 강조합니다.
+      // "지표 분석"(분석 기록) 탭은 인라인 스타일로 고정된 색을 갖고 있어서 이 클래스 전환과 무관하게 계속 그 색을 유지합니다.
+      btnEl.className = (k !== "dash" && k === mode) ? "btn small" : "btn small secondary";
     });
     if (mode !== "note") document.getElementById("metricResultWrap").innerHTML = "";
   }
