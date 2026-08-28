@@ -1351,24 +1351,92 @@ function openFolderEntryDetailModal(section, entry) {
     document.getElementById("editFromDetailBtn").onclick = () => openModal(section, entry);
   }
 }
-// 지점 원장 미팅 일지 맨 위에 고정으로 띄우는 "팀장 미팅 주차별 주제" 안내입니다. 데이터가 아니라 화면에 박아둔 고정값이라,
-// 내용을 바꾸려면 아래 배열을 코드에서 직접 수정해야 합니다.
-const DIRECTOR_MEETING_WEEKLY_TOPICS = [
+// 지점 원장 미팅 일지 맨 위에 고정으로 띄우는 "팀장 미팅 주차별 주제" 안내입니다.
+// Firestore(siteLinks/directorMeetingTopics)에 저장된 값을 불러오고, 아직 저장된 적이 없으면 아래 기본값을 보여줍니다.
+// 팀장 화면에서 "수정" 버튼으로 직접 고칠 수 있습니다.
+const DIRECTOR_MEETING_WEEKLY_TOPICS_DEFAULT = [
   { week: "1주차 전체 회의 + 팀회의", topic: "유입지표(DB) 기입" },
   { week: "2주차 오프라인 2시간", topic: "지난달 포커싱 성찰, 지난달 지표분석, 이번달 포커싱 진행 상황, 다음달 포커싱 수립" },
   { week: "3주차 온라인 1시간", topic: "종료분석, 유입분석(초기학생 브리핑, 지점 DB), 에듀큐브 상담일지, 에듀큐브 신호등 체크" },
   { week: "4주차 온라인 1시간", topic: "이번달 포커싱 진행 상황, 다음달 포커싱 진행 상황, 지난달 손익계산서 분석, 본사 고객만족도조사 리뷰" }
 ];
-function renderDirectorMeetingTopicsCard() {
-  return `<div class="card">
-    <h2 style="margin-bottom:12px;">팀장 미팅 주차별 주제</h2>
+async function loadDirectorMeetingTopics() {
+  try {
+    const snap = await getDoc(doc(db, "siteLinks", "directorMeetingTopics"));
+    if (snap.exists() && Array.isArray(snap.data().topics) && snap.data().topics.length) return snap.data().topics;
+  } catch (err) { /* 무시하고 기본값 사용 */ }
+  return DIRECTOR_MEETING_WEEKLY_TOPICS_DEFAULT;
+}
+async function renderDirectorMeetingTopicsInto(wrap) {
+  const topics = await loadDirectorMeetingTopics();
+  const isLeader = state.profile.role === "leader";
+  wrap.innerHTML = `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h2 style="margin:0;">팀장 미팅 주차별 주제</h2>
+      ${isLeader ? `<button type="button" class="icon-btn" id="editDirectorTopicsBtn">✎ 수정</button>` : ""}
+    </div>
     <div style="display:flex;flex-direction:column;gap:10px;">
-      ${DIRECTOR_MEETING_WEEKLY_TOPICS.map(t => `<div style="display:flex;gap:10px;align-items:baseline;">
+      ${topics.map(t => `<div style="display:flex;gap:10px;align-items:baseline;">
         <span class="pill normal" style="flex-shrink:0;white-space:nowrap;">${escapeHtml(t.week)}</span>
         <span style="font-size:13.5px;line-height:1.6;">${escapeHtml(t.topic)}</span>
       </div>`).join("")}
     </div>
   </div>`;
+  if (isLeader) {
+    document.getElementById("editDirectorTopicsBtn").onclick = () => {
+      openDirectorMeetingTopicsModal(topics, async (newTopics) => {
+        await setDoc(doc(db, "siteLinks", "directorMeetingTopics"), { topics: newTopics, updatedAt: new Date().toISOString(), updatedBy: state.profile.name });
+        renderDirectorMeetingTopicsInto(wrap);
+      });
+    };
+  }
+}
+function openDirectorMeetingTopicsModal(topics, onSave) {
+  const root = document.getElementById("modalRoot");
+  const rowHtml = (t, i) => `<div class="field" data-topic-row="${i}" style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:10px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <label style="margin-bottom:4px;">주차 표시</label>
+      <button type="button" class="icon-btn danger" data-remove-row="${i}" title="이 줄 삭제">삭제</button>
+    </div>
+    <input type="text" class="topicWeekInput" placeholder="예: 1주차 전체 회의 + 팀회의" value="${escapeHtml(t.week || "")}">
+    <label style="margin:8px 0 4px;display:block;">내용</label>
+    <textarea class="topicContentInput" rows="2" placeholder="예: 유입지표(DB) 기입">${escapeHtml(t.topic || "")}</textarea>
+  </div>`;
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal" style="max-width:520px;">
+      <h3>팀장 미팅 주차별 주제 수정</h3>
+      <form id="topicsForm">
+        <div id="topicsRowsWrap">${topics.map(rowHtml).join("")}</div>
+        <button type="button" class="btn small secondary" id="addTopicRowBtn" style="margin-bottom:10px;">+ 줄 추가</button>
+        <div class="grid-2">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="submit" class="btn">저장</button>
+        </div>
+      </form>
+    </div></div>`;
+  const rowsWrap = document.getElementById("topicsRowsWrap");
+  let rowCount = topics.length;
+  const bindRemoveButtons = () => {
+    rowsWrap.querySelectorAll("[data-remove-row]").forEach(btn => {
+      btn.onclick = () => { btn.closest("[data-topic-row]").remove(); };
+    });
+  };
+  bindRemoveButtons();
+  document.getElementById("addTopicRowBtn").onclick = () => {
+    rowsWrap.insertAdjacentHTML("beforeend", rowHtml({ week: "", topic: "" }, rowCount++));
+    bindRemoveButtons();
+  };
+  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  document.getElementById("topicsForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const newTopics = [...rowsWrap.querySelectorAll("[data-topic-row]")].map(rowEl => ({
+      week: rowEl.querySelector(".topicWeekInput").value.trim(),
+      topic: rowEl.querySelector(".topicContentInput").value.trim()
+    })).filter(t => t.week || t.topic);
+    root.innerHTML = "";
+    await onSave(newTopics);
+  });
 }
 
 async function renderMeetingGrid(section) {
@@ -1380,11 +1448,14 @@ async function renderMeetingGrid(section) {
       </div>
       ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
     </div>
-    ${section.key === "directorMeeting" ? renderDirectorMeetingTopicsCard() : ""}
+    ${section.key === "directorMeeting" ? `<div id="directorTopicsWrap"></div>` : ""}
     <div class="card" style="overflow:auto;"><div id="meetingGridWrap">불러오는 중...</div></div>`;
 
   if (canWriteSection(section)) {
     document.getElementById("addBtn").onclick = () => openModal(section, null);
+  }
+  if (section.key === "directorMeeting") {
+    renderDirectorMeetingTopicsInto(document.getElementById("directorTopicsWrap"));
   }
 
   const docs = await fetchDocs(section);
