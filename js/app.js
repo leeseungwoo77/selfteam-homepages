@@ -1351,6 +1351,26 @@ function openFolderEntryDetailModal(section, entry) {
     document.getElementById("editFromDetailBtn").onclick = () => openModal(section, entry);
   }
 }
+// 지점 원장 미팅 일지 맨 위에 고정으로 띄우는 "팀장 미팅 주차별 주제" 안내입니다. 데이터가 아니라 화면에 박아둔 고정값이라,
+// 내용을 바꾸려면 아래 배열을 코드에서 직접 수정해야 합니다.
+const DIRECTOR_MEETING_WEEKLY_TOPICS = [
+  { week: "1주차 전체 회의 + 팀회의", topic: "유입지표(DB) 기입" },
+  { week: "2주차 오프라인 2시간", topic: "지난달 포커싱 성찰, 지난달 지표분석, 이번달 포커싱 진행 상황, 다음달 포커싱 수립" },
+  { week: "3주차 온라인 1시간", topic: "종료분석, 유입분석(초기학생 브리핑, 지점 DB), 에듀큐브 상담일지, 에듀큐브 신호등 체크" },
+  { week: "4주차 온라인 1시간", topic: "이번달 포커싱 진행 상황, 다음달 포커싱 진행 상황, 지난달 손익계산서 분석, 본사 고객만족도조사 리뷰" }
+];
+function renderDirectorMeetingTopicsCard() {
+  return `<div class="card">
+    <h2 style="margin-bottom:12px;">팀장 미팅 주차별 주제</h2>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      ${DIRECTOR_MEETING_WEEKLY_TOPICS.map(t => `<div style="display:flex;gap:10px;align-items:baseline;">
+        <span class="pill normal" style="flex-shrink:0;white-space:nowrap;">${escapeHtml(t.week)}</span>
+        <span style="font-size:13.5px;line-height:1.6;">${escapeHtml(t.topic)}</span>
+      </div>`).join("")}
+    </div>
+  </div>`;
+}
+
 async function renderMeetingGrid(section) {
   const main = document.getElementById("mainContent");
   main.innerHTML = `<div class="page-header">
@@ -1360,6 +1380,7 @@ async function renderMeetingGrid(section) {
       </div>
       ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
     </div>
+    ${section.key === "directorMeeting" ? renderDirectorMeetingTopicsCard() : ""}
     <div class="card" style="overflow:auto;"><div id="meetingGridWrap">불러오는 중...</div></div>`;
 
   if (canWriteSection(section)) {
