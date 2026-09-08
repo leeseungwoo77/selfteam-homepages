@@ -4256,6 +4256,24 @@ function openModal(section, existing, prefill) {
         data.folderId = section.folderId;
         if (!existing) data.order = Date.now();
       }
+      // 원장 미팅(이사님 검토)은 "+ 새로 등록"으로 만든 완전히 새 제목의 줄이면 맨 위로 오도록,
+      // 현재 등록된 줄들 중 가장 작은 rowOrder보다 더 작은 값을 매겨둡니다. (제목이 이미 있던 줄에 지점만 추가하는 경우는 그대로 둡니다)
+      if (!existing && section.key === "directorMeeting") {
+        try {
+          const existingDocs = await fetchDocs(section);
+          const newTitle = (data.title || "").trim() || "(제목 없음)";
+          const existingTitles = new Set(existingDocs.map(d => d.title || "(제목 없음)"));
+          if (!existingTitles.has(newTitle)) {
+            const rowOrderByTitle = {};
+            existingDocs.forEach(d => {
+              const t = d.title || "(제목 없음)";
+              if (d.rowOrder !== undefined && rowOrderByTitle[t] === undefined) rowOrderByTitle[t] = d.rowOrder;
+            });
+            const defined = Object.values(rowOrderByTitle);
+            data.rowOrder = defined.length ? Math.min(...defined) - 1 : 0;
+          }
+        } catch (err) { /* 순서 계산에 실패해도 저장 자체는 계속 진행합니다 */ }
+      }
       data.updatedAt = new Date().toISOString();
       data.updatedBy = state.profile.name;
 
