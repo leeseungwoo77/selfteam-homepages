@@ -120,10 +120,8 @@ const LOCATION_COLORS = {
   "에듀": "#E03C3C", "에듀본사": "#E03C3C", "상상": "#F5A623", "진학": "#2979FF",
   "돈암": "#00C853", "행당": "#D3339C", "별내": "#FFD600", "다산": "#8E1E1E"
 };
-// 배경색이 밝아서 흰 글씨는 잘 안 보이는 지점은 검정 글씨로 표시합니다.
-const LOCATION_TEXT_COLORS = {
-  "돈암": "#000000", "별내": "#000000"
-};
+// 배경색이 밝아서 흰 글씨는 잘 안 보이는 지점은 검정 글씨로 표시합니다. (돈암·별내는 흰 글씨로 표시)
+const LOCATION_TEXT_COLORS = {};
 function matchLocationColor(str) {
   if (LOCATION_COLORS[str]) return LOCATION_COLORS[str];
   for (const key of Object.keys(LOCATION_COLORS)) {
