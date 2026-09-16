@@ -209,7 +209,8 @@ const SCHEDULE_KEYWORD_RULES = [
   { word: "식사", bg: "#BFBFBF", color: "#000" },
   { word: "생일", bg: "#8E44AD", color: "#fff" },
   { word: "이동", bg: "#F0E4C8", color: "#000" },
-  { word: "휴무", bg: "#FFFFFF", color: "#E03C3C" }
+  { word: "휴무", bg: "#FFFFFF", color: "#E03C3C" },
+  { word: "코칭", bg: "#00897B", color: "#fff" }
 ];
 function computeScheduleCellStyle(text, explicitColor, explicitTextColor) {
   // 지점명이나 "연차/회의/식사" 같은 키워드가 글자에 들어있으면, 예전에 지정해둔(또는 붙여넣기로 딸려온)
@@ -252,7 +253,7 @@ async function renderMonthlySchedule(section) {
   main.innerHTML = `<div class="page-header">
       <div>
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
-        <p>${section.desc}${canEdit ? " · 칸을 클릭해서 바로 입력하고, 다른 곳을 클릭하면 저장돼요." : ""}</p>
+        <p>${section.desc}${canEdit ? " · 칸을 클릭해서 바로 입력하고, 다른 곳을 클릭하면 저장돼요. 마우스로 드래그하면 여러 칸을 한 번에 선택할 수 있어요." : ""}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
         <button class="icon-btn" id="prevMonthBtn" style="font-size:18px;">‹</button>
@@ -265,7 +266,7 @@ async function renderMonthlySchedule(section) {
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;">배경색 <input type="color" id="cellBgPicker" value="#ffffff"></label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;">글자색 <input type="color" id="cellTextPicker" value="#000000"></label>
       <button class="btn small secondary" id="cellClearFormatBtn" type="button">자동 서식으로 되돌리기</button>
-      <span id="activeCellHint" style="font-size:11px;color:var(--text-muted);">먼저 표에서 칸을 클릭한 뒤 색을 골라주세요.</span>
+      <span id="activeCellHint" style="font-size:11px;color:var(--text-muted);">먼저 표에서 칸을 클릭하거나 드래그해서 선택한 뒤 색을 골라주세요.</span>
     </div>` : ""}
     <div id="scheduleTopScroll" style="overflow-x:auto;overflow-y:hidden;height:16px;margin-bottom:4px;"><div id="scheduleTopScrollInner" style="height:1px;"></div></div>
     <div class="card" id="scheduleScrollCard" style="overflow:auto;max-height:calc(100vh - 190px);"><div id="scheduleCalendar">불러오는 중...</div></div>`;
@@ -412,11 +413,60 @@ async function renderMonthlySchedule(section) {
 
   let activeCellInput = null;
 
+  // 엑셀처럼 마우스로 드래그해서 여러 칸을 한 번에 선택하고 서식을 바꿀 수 있도록,
+  // 칸 하나하나를 key("날짜|행")로 관리하는 지도(cellByKey)와 현재 선택된 칸 목록(selectedKeys)을 둡니다.
+  const cellKeyOf = (date, row) => `${date}|${row}`;
+  const parseDayNum = (dateStr) => parseInt(dateStr.slice(-2), 10);
+  const cellByKey = new Map();
+  let dragAnchor = null;
+  let isMouseDown = false;
+  let selectedKeys = new Set();
+
+  function highlightSelection() {
+    cellByKey.forEach(({ td }) => td.classList.remove("sched-cell-selected"));
+    selectedKeys.forEach(k => { const ref = cellByKey.get(k); if (ref) ref.td.classList.add("sched-cell-selected"); });
+  }
+
+  function selectRectangle(anchor, current) {
+    const rowStartIdx = SCHEDULE_ROW_ORDER.indexOf(anchor.row);
+    const rowEndIdx = SCHEDULE_ROW_ORDER.indexOf(current.row);
+    const colStartIdx = dates.indexOf(parseDayNum(anchor.date));
+    const colEndIdx = dates.indexOf(parseDayNum(current.date));
+    if (rowStartIdx === -1 || rowEndIdx === -1 || colStartIdx === -1 || colEndIdx === -1) return;
+    const rowLo = Math.min(rowStartIdx, rowEndIdx), rowHi = Math.max(rowStartIdx, rowEndIdx);
+    const colLo = Math.min(colStartIdx, colEndIdx), colHi = Math.max(colStartIdx, colEndIdx);
+    const keys = new Set();
+    for (let ri = rowLo; ri <= rowHi; ri++) {
+      for (let ci = colLo; ci <= colHi; ci++) {
+        keys.add(cellKeyOf(ymd(year, month, dates[ci]), SCHEDULE_ROW_ORDER[ri]));
+      }
+    }
+    selectedKeys = keys;
+    highlightSelection();
+    document.getElementById("activeCellHint").textContent = keys.size > 1 ? `${keys.size}칸 선택됨 (드래그 범위)` : `${anchor.date} 칸 선택됨`;
+  }
+
+  document.onmouseup = () => { isMouseDown = false; };
+
   if (canEdit) {
     document.querySelectorAll(".sched-cell").forEach(input => {
+      cellByKey.set(cellKeyOf(input.dataset.date, input.dataset.row), { td: input.closest("td"), input });
+      input.addEventListener("mousedown", (e) => {
+        // 브라우저 기본 동작(글자 드래그 선택)을 막아야, 마우스를 누른 채 다른 칸으로 넘어갈 때도
+        // 그 칸의 mouseenter 이벤트가 정상적으로 들어와서 여러 칸 선택이 끊기지 않습니다.
+        e.preventDefault();
+        input.focus();
+        input.select();
+        isMouseDown = true;
+        dragAnchor = { date: input.dataset.date, row: input.dataset.row };
+        selectRectangle(dragAnchor, dragAnchor);
+      });
+      input.addEventListener("mouseenter", () => {
+        if (!isMouseDown || !dragAnchor) return;
+        selectRectangle(dragAnchor, { date: input.dataset.date, row: input.dataset.row });
+      });
       input.addEventListener("focus", () => {
         activeCellInput = input;
-        document.getElementById("activeCellHint").textContent = `${input.dataset.date} 칸 선택됨`;
         document.querySelectorAll("#scheduleCalendar td.sched-row-active").forEach(td => td.classList.remove("sched-row-active"));
         const rowLabelTd = input.closest("tr")?.querySelector("td:first-child");
         if (rowLabelTd) rowLabelTd.classList.add("sched-row-active");
@@ -495,20 +545,32 @@ async function renderMonthlySchedule(section) {
       });
     });
 
-    async function applyCellFormat(bg, textColor) {
-      if (!activeCellInput) { alert("먼저 표에서 칸을 클릭해주세요."); return; }
-      const dateStr = activeCellInput.dataset.date;
-      const rowKey = activeCellInput.dataset.row;
-      if (!byDate[dateStr]) byDate[dateStr] = { date: dateStr, cells: {} };
-      if (!byDate[dateStr].cells) byDate[dateStr].cells = {};
-      const existing = byDate[dateStr].cells[rowKey] || {};
-      const text = activeCellInput.value.trim();
-      byDate[dateStr].cells[rowKey] = { text, color: bg, textColor: textColor };
+    // 선택된 칸이 하나든(클릭) 여러 개든(드래그) 똑같이 처리합니다. updater가 각 칸의 기존 값(existing)과
+    // 지금 입력창에 있는 글자(text)를 받아서, 그 칸에 새로 저장할 값을 돌려줍니다.
+    async function commitFormat(updater) {
+      if (!selectedKeys.size) { alert("먼저 표에서 칸을 클릭하거나 드래그해서 선택해주세요."); return; }
+      const touchedDates = new Set();
+      selectedKeys.forEach(k => {
+        const [dateStr, rowKey] = k.split("|");
+        if (!byDate[dateStr]) byDate[dateStr] = { date: dateStr, cells: {} };
+        if (!byDate[dateStr].cells) byDate[dateStr].cells = {};
+        const existing = byDate[dateStr].cells[rowKey] || {};
+        const ref = cellByKey.get(k);
+        const text = ref ? ref.input.value.trim() : (existing.text || "");
+        byDate[dateStr].cells[rowKey] = updater(existing, text);
+        touchedDates.add(dateStr);
+      });
       try {
-        await setDoc(doc(db, "scheduleEntries", dateStr), { date: dateStr, cells: byDate[dateStr].cells });
-        const { bg: finalBg, color: finalColor } = computeScheduleCellStyle(text, bg, textColor);
-        const td = activeCellInput.closest("td");
-        td.style.cssText = `${cellBase}${finalBg ? `background:${finalBg};color:${finalColor};font-weight:700;` : ""}padding:0;border-radius:4px;`;
+        await Promise.all(Array.from(touchedDates).map(dateStr =>
+          setDoc(doc(db, "scheduleEntries", dateStr), { date: dateStr, cells: byDate[dateStr].cells })
+        ));
+        selectedKeys.forEach(k => {
+          const [dateStr, rowKey] = k.split("|");
+          const cell = byDate[dateStr].cells[rowKey];
+          const { bg: finalBg, color: finalColor } = computeScheduleCellStyle(cell.text, cell.color, cell.textColor);
+          const ref = cellByKey.get(k);
+          if (ref) ref.td.style.cssText = `${cellBase}${finalBg ? `background:${finalBg};color:${finalColor};font-weight:700;` : ""}padding:0;border-radius:4px;`;
+        });
       } catch (err) {
         alert("저장 중 오류: " + err.message);
       }
@@ -517,18 +579,14 @@ async function renderMonthlySchedule(section) {
     const bgPicker = document.getElementById("cellBgPicker");
     const textPicker = document.getElementById("cellTextPicker");
     bgPicker.addEventListener("change", () => {
-      const dateStr = activeCellInput?.dataset.date;
-      const rowKey = activeCellInput?.dataset.row;
-      const existingTextColor = (dateStr && byDate[dateStr]?.cells?.[rowKey]?.textColor) || textPicker.value;
-      applyCellFormat(bgPicker.value, existingTextColor);
+      commitFormat((existing, text) => ({ text, color: bgPicker.value, textColor: existing.textColor || textPicker.value }));
     });
     textPicker.addEventListener("change", () => {
-      const dateStr = activeCellInput?.dataset.date;
-      const rowKey = activeCellInput?.dataset.row;
-      const existingBg = (dateStr && byDate[dateStr]?.cells?.[rowKey]?.color) || bgPicker.value;
-      applyCellFormat(existingBg, textPicker.value);
+      commitFormat((existing, text) => ({ text, color: existing.color || bgPicker.value, textColor: textPicker.value }));
     });
-    document.getElementById("cellClearFormatBtn").onclick = () => applyCellFormat(null, null);
+    document.getElementById("cellClearFormatBtn").onclick = () => {
+      commitFormat((existing, text) => ({ text, color: null, textColor: null }));
+    };
   }
 }
 

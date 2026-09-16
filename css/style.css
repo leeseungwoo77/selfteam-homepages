@@ -333,6 +333,8 @@ td.actions { white-space: nowrap; text-align: right; }
 .thumb-item img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
 /* 팀장 일정 표에서 지금 입력 중인 칸이 있는 줄의 왼쪽 라벨을 강조해줍니다. */
 .sched-row-active { box-shadow: inset 0 0 0 2px var(--blue-bright) !important; }
+/* 엑셀처럼 마우스로 드래그해서 여러 칸을 선택했을 때, 선택된 칸들에 파란 테두리를 표시합니다. */
+.sched-cell-selected { box-shadow: inset 0 0 0 2px var(--blue-bright) !important; position: relative; z-index: 2; }
 
 .thumb-remove {
   position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%;
