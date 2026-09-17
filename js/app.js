@@ -4082,6 +4082,23 @@ function wireRichtextToolbarFor(editEl, toolbar) {
   };
   editEl.addEventListener("keyup", () => { saveSelection(); updateFloatingToolbar(); });
   editEl.addEventListener("mouseup", () => { saveSelection(); updateFloatingToolbar(); });
+  // 붙여넣기(Ctrl+V)는 직접 처리합니다. 복사한 프로그램이 서식 있는 내용(text/html)을 주면 그대로 살리고,
+  // 글자만(text/plain) 온 경우엔 그 글자 자체가 "<span>..." 같은 HTML 태그 글자면 서식으로 되살리고,
+  // 진짜 순수한 글자면 줄바꿈만 살려서 넣습니다. (이렇게 하지 않으면 태그 글자가 화면에 그대로 보이는 문제가 생겼습니다.)
+  editEl.addEventListener("paste", (e) => {
+    e.preventDefault();
+    const html = e.clipboardData ? e.clipboardData.getData("text/html") : "";
+    const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+    let toInsert;
+    if (html && html.trim()) {
+      toInsert = sanitizeRichHtml(html);
+    } else if (looksLikeRawHtmlText(text)) {
+      toInsert = sanitizeRichHtml(text);
+    } else {
+      toInsert = escapeHtml(text || "").replace(/\r\n|\r|\n/g, "<br>");
+    }
+    document.execCommand("insertHTML", false, toInsert);
+  });
   document.addEventListener("mousedown", (e) => {
     if (e.target !== editEl && !editEl.contains(e.target) && e.target !== toolbar && !toolbar.contains(e.target)) {
       resetToolbarPosition(toolbar);
@@ -4128,8 +4145,30 @@ const RICHTEXT_ALLOWED_TAGS = new Set([
 const RICHTEXT_ALLOWED_ATTRS = new Set(["style","href","target","colspan","rowspan","class"]);
 const RICHTEXT_ALLOWED_CLASSES = new Set(["rt-small","rt-large"]);
 
+// 다른 프로그램(Tiro 등)에서 복사한 내용이 "붙여넣기"로 잘못 들어오면, 실제 서식이 아니라
+// <span>이런 태그 글자</span> 자체가 화면에 그대로 보이는 문서가 저장될 때가 있습니다.
+// 그런 문서를 다시 열었을 때 자동으로 알아채서 진짜 서식으로 되살립니다.
+function looksLikeRawHtmlText(str) {
+  const s = (str || "").trim();
+  if (s.length < 5 || !s.includes("<")) return false;
+  return /<\/?(span|p|div|strong|b|i|em|u|ul|ol|li|table|thead|tbody|tr|td|th|br|hr|a|h[1-4]|blockquote|code|pre)\b[^>]*>/i.test(s);
+}
+function repairIfRawHtmlText(rawHtml) {
+  let current = rawHtml;
+  for (let i = 0; i < 2; i++) {
+    const probe = new DOMParser().parseFromString(current, "text/html");
+    const hasElementChild = [...probe.body.childNodes].some(n => n.nodeType === 1);
+    const bodyText = probe.body.textContent || "";
+    if (!hasElementChild && looksLikeRawHtmlText(bodyText)) {
+      current = bodyText; // 이 글자 자체를 HTML로 다시 취급해서 다음 루프(또는 아래 정상 처리)에서 파싱합니다.
+    } else {
+      break;
+    }
+  }
+  return current;
+}
 function sanitizeRichHtml(html) {
-  const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+  const doc = new DOMParser().parseFromString(repairIfRawHtmlText(String(html || "")), "text/html");
   function clean(node) {
     [...node.childNodes].forEach(child => {
       if (child.nodeType === 1) {
