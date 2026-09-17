@@ -49,10 +49,9 @@ const SECTIONS = [
 
   { key:"memberMeeting", label:"지점 팀원 개별 미팅 일지", group:"일정·미팅", color:"green",
     collectionName:"memberMeetings", scope:"branch", writable:"leader-and-branch",
-    desc:"지점 팀원과의 개별 미팅 내용을 기록합니다.",
-    isMeetingGrid:true, headerFields:["title","date","branchName","memberName"],
+    desc:"지점 팀원별로 미팅 내용을 이어서 기록합니다. (지점마다 팀원 수가 달라 팀원 단위로 모아 보여줍니다)",
+    isMemberLog:true, hasBranchSubmenu:true, headerFields:["date","branchName","memberName"],
     fields:[
-      { key:"title", label:"제목", type:"text" },
       { key:"date", label:"날짜", type:"date" },
       { key:"branchId", label:"지점", type:"branchSelect" },
       { key:"memberName", label:"팀원 이름", type:"text" },
@@ -1029,6 +1028,7 @@ async function renderSection(key) {
   if (section.isRosterGrid) { renderRosterGrid(section); return; }
   if (section.isTaskTracking) { renderTaskTracking(section); return; }
   if (section.isMeetingGrid) { renderMeetingGrid(section); return; }
+  if (section.isMemberLog) { renderMemberMeetingLog(section); return; }
   if (section.cardView) { renderFolderGrid(section); return; }
 
   const branchId = state.branchFilter[section.key];
@@ -1224,6 +1224,118 @@ async function renderLogCards(section) {
       showToast("삭제되었습니다.");
       renderSection(section.key);
     };
+  });
+}
+
+/* ===================== 지점 팀원 개별 미팅 일지 - 팀원별로 이어서 보기 =====================
+   지점마다 팀원 수가 다르기 때문에, "미팅 제목" 행으로 지점을 나란히 놓는 표 대신
+   팀원 한 명당 카드 하나를 만들고 그 안에 미팅 기록을 최신순으로 이어 붙여 보여줍니다.
+   원장님(팀원)은 fetchDocs가 이미 자기 지점 데이터만 가져오므로 자기 지점 사람 기록만 보게 됩니다. =========== */
+async function renderMemberMeetingLog(section) {
+  const main = document.getElementById("mainContent");
+  const branchId = state.branchFilter[section.key];
+  const branchLabel = section.hasBranchSubmenu
+    ? (canViewAllRole()
+        ? (branchId ? " · " + (state.branches.find(b => b.id === branchId)?.name || "") : " · 전체")
+        : " · " + (state.profile.branchName || ""))
+    : "";
+
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}${branchLabel}</h1>
+        <p>${section.desc}</p>
+      </div>
+      ${canWriteSection(section) ? `<button class="btn small" id="addBtn">+ 새로 등록</button>` : ""}
+    </div>
+    <div id="memberLogList">불러오는 중...</div>`;
+
+  if (canWriteSection(section)) {
+    document.getElementById("addBtn").onclick = () => openModal(section, null, branchId ? { branchId } : undefined);
+  }
+
+  const docs = await fetchDocs(section); // date/createdAt 기준 최신순으로 이미 정렬돼 있습니다.
+  const wrap = document.getElementById("memberLogList");
+  if (!docs.length) {
+    wrap.innerHTML = `<div class="card"><div class="empty-state"><div class="shape"></div>아직 등록된 미팅 기록이 없습니다.</div></div>`;
+    return;
+  }
+
+  const imageField = section.fields.find(f => f.type === "imageUpload");
+  const showBranchBadge = canViewAllRole() && !branchId; // "전체"로 볼 때만 지점을 함께 표시합니다.
+
+  // 팀원(+지점) 단위로 묶습니다. 다른 지점에 같은 이름의 팀원이 있어도 서로 섞이지 않도록 지점까지 키에 포함합니다.
+  const groupMap = new Map();
+  docs.forEach(d => {
+    const rawName = (d.memberName || "").trim();
+    const groupKey = `${d.branchId || ""}|${rawName}`;
+    if (!groupMap.has(groupKey)) {
+      groupMap.set(groupKey, { memberName: rawName || "(이름 미정)", memberNameRaw: rawName, branchId: d.branchId || "", branchName: d.branchName || "", docs: [] });
+    }
+    groupMap.get(groupKey).docs.push(d);
+  });
+  const groups = [...groupMap.values()].sort((a, b) => {
+    const aLatest = a.docs[0]?.date || a.docs[0]?.createdAt || "";
+    const bLatest = b.docs[0]?.date || b.docs[0]?.createdAt || "";
+    return bLatest.localeCompare(aLatest); // 최근에 기록을 남긴 팀원이 위로 오게
+  });
+
+  wrap.innerHTML = groups.map(g => {
+    const entriesHtml = g.docs.map(d => {
+      const editable = canEditDoc(section, d);
+      const images = imageField ? (d[imageField.key] || []).filter(Boolean) : [];
+      const contentHtml = d.content ? escapeHtml(String(d.content)).replace(/\n/g, "<br>") : "";
+      const followUpHtml = d.followUp ? escapeHtml(String(d.followUp)).replace(/\n/g, "<br>") : "";
+      const preview = (d.content || "").replace(/\s+/g, " ").trim();
+      return `<div class="member-log-entry">
+        <div class="log-summary" data-toggle="${d.id}">
+          <div>
+            <div style="font-weight:700;font-size:13.5px;">${escapeHtml(d.date || "(날짜 없음)")}</div>
+            <div style="font-size:12.5px;color:var(--text-muted);margin-top:2px;">${escapeHtml(preview.slice(0, 50))}${preview.length > 50 ? "…" : (preview ? "" : "(내용 없음)")}<span class="log-chevron">›</span></div>
+          </div>
+          ${editable ? `<div>
+            <button class="icon-btn" data-act="edit" data-id="${d.id}">수정</button>
+            <button class="icon-btn danger" data-act="del" data-id="${d.id}">삭제</button>
+          </div>` : ""}
+        </div>
+        <div class="log-body" id="body_${d.id}">
+          ${contentHtml ? `<div style="margin:10px 0 4px;"><strong>미팅 내용</strong><div class="rich-content">${contentHtml}</div></div>` : ""}
+          ${followUpHtml ? `<div style="margin:10px 0 4px;"><strong>후속조치</strong><div class="rich-content">${followUpHtml}</div></div>` : ""}
+          ${renderAttachmentGallery(images)}
+        </div>
+      </div>`;
+    }).join("");
+
+    return `<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 22px 12px;">
+        <h3 style="margin:0;">${escapeHtml(g.memberName)}${showBranchBadge && g.branchName ? ` <span class="pill normal" style="font-weight:600;">${escapeHtml(g.branchName)}</span>` : ""}</h3>
+        ${canWriteSection(section) ? `<button type="button" class="btn small secondary" data-add-for="${escapeHtml(g.memberNameRaw)}" data-add-branch="${escapeHtml(g.branchId)}">+ 미팅 추가</button>` : ""}
+      </div>
+      ${entriesHtml}
+    </div>`;
+  }).join("");
+
+  wrap.querySelectorAll(".log-summary").forEach(el => {
+    el.onclick = () => {
+      const body = document.getElementById(`body_${el.dataset.toggle}`);
+      const opening = !body.classList.contains("open");
+      body.classList.toggle("open", opening);
+      el.classList.toggle("open", opening);
+    };
+  });
+  wrap.querySelectorAll('[data-act="edit"]').forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); openModal(section, docs.find(d => d.id === btn.dataset.id)); };
+  });
+  wrap.querySelectorAll('[data-act="del"]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm("정말 삭제하시겠습니까?")) return;
+      await deleteDoc(doc(db, section.collectionName, btn.dataset.id));
+      showToast("삭제되었습니다.");
+      renderSection(section.key);
+    };
+  });
+  wrap.querySelectorAll("[data-add-for]").forEach(btn => {
+    btn.onclick = () => openModal(section, null, { memberName: btn.dataset.addFor, branchId: btn.dataset.addBranch || "" });
   });
 }
 

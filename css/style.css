@@ -312,6 +312,8 @@ td.actions { white-space: nowrap; text-align: right; }
 .log-body { display: none; padding: 0 22px 22px; }
 .log-body.open { display: block; }
 .meeting-gallery { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+/* 지점 팀원 개별 미팅 일지 - 한 팀원 카드 안에 여러 기록이 이어질 때 구분선을 그어줍니다. */
+.member-log-entry + .member-log-entry { border-top: 1px solid var(--border); }
 .img-zoom-wrap { max-width: 100%; border-radius: 10px; }
 .img-zoom-wrap.full { width: 100%; }
 .meeting-img {
