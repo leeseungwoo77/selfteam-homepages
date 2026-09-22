@@ -3338,7 +3338,13 @@ async function renderMetricAnalysis(section) {
       const wrap = document.getElementById("metricNotesWrap");
       if (!wrap) return;
       if (!notes.length) { wrap.innerHTML = `<div class="empty-state">아직 남긴 분석 기록이 없습니다.</div>`; return; }
-      wrap.innerHTML = notes.map(n => `<div class="card" style="margin-bottom:12px;">
+      wrap.innerHTML = notes.map(n => {
+        // 예전에 남긴 기록은 줄글(순수 텍스트)로 저장돼 있고, 새로 남기는 기록은 서식 있는 글(HTML)로 저장됩니다.
+        // 어떤 형태로 저장돼 있는지 자동으로 알아채서 알맞게 보여줍니다.
+        const contentHtml = looksLikeRawHtmlText(n.content || "")
+          ? sanitizeRichHtml(n.content || "")
+          : escapeHtml(n.content || "").replace(/\n/g, "<br>");
+        return `<div class="card" style="margin-bottom:12px;">
         <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <span class="pill normal">${escapeHtml(n.branchLabel || "전체")}</span>
@@ -3346,11 +3352,12 @@ async function renderMetricAnalysis(section) {
           </div>
           <div style="font-size:11.5px;color:var(--text-muted);">${escapeHtml(n.createdBy || "")} · ${escapeHtml((n.createdAt || "").slice(0, 16).replace("T", " "))}</div>
         </div>
-        <p style="white-space:pre-wrap;margin:10px 0 0;font-size:13.5px;line-height:1.6;">${escapeHtml(n.content || "")}</p>
         ${renderAttachmentGallery((n.images || []).filter(Boolean))}
+        <div class="rich-content" style="white-space:pre-wrap;margin-top:10px;">${contentHtml}</div>
         ${n.followUp ? `<div style="margin-top:10px;padding:10px 12px;background:#F4FAEF;border-radius:8px;font-size:12.5px;"><strong>후속조치</strong><div style="white-space:pre-wrap;margin-top:4px;">${escapeHtml(n.followUp)}</div></div>` : ""}
         ${canEditMetricNote(n) ? `<div style="margin-top:10px;text-align:right;"><button class="icon-btn" data-edit-note="${n.id}">수정</button><button class="icon-btn danger" data-del-note="${n.id}">삭제</button></div>` : ""}
-      </div>`).join("");
+      </div>`;
+      }).join("");
       wrap.querySelectorAll("[data-edit-note]").forEach(btn => {
         btn.onclick = () => openMetricNoteModal(notes.find(n => n.id === btn.dataset.editNote));
       });
@@ -3388,6 +3395,11 @@ async function renderMetricAnalysis(section) {
       const root = document.getElementById("modalRoot");
       const cur = existing || prefill || {};
       const imageState = { urls: [...((cur && cur.images) || [])], files: [] };
+      // 예전 기록은 줄글(순수 텍스트)로 저장돼 있어서, 서식 편집창에 그대로 넣기 전에 줄바꿈을 살려 HTML로 바꿔줍니다.
+      // 새로 저장되는 기록은 이미 서식 있는 HTML이라 그대로 씁니다.
+      const initialContentHtml = cur.content
+        ? (looksLikeRawHtmlText(cur.content) ? sanitizeRichHtml(cur.content) : escapeHtml(cur.content).replace(/\n/g, "<br>"))
+        : "";
       // 지표 표를 계속 보면서 기록할 수 있도록, 화면 전체를 가리는 팝업 대신 오른쪽에 붙는 서랍형 패널로 엽니다.
       root.innerHTML = `<div class="side-drawer" id="noteDrawer">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
@@ -3400,7 +3412,11 @@ async function renderMetricAnalysis(section) {
               <div class="field"><label>연도</label><select id="noteYear">${years.map(y => `<option value="${escapeHtml(y)}" ${cur.year === y ? "selected" : ""}>${escapeHtml(y)}</option>`).join("")}</select></div>
             </div>
             <div class="field"><label>월 (선택 안 함 가능)</label><select id="noteMonth"><option value="">해당 없음</option>${months.map(m => `<option value="${escapeHtml(m)}" ${cur.month === m ? "selected" : ""}>${escapeHtml(m)}</option>`).join("")}</select></div>
-            <div class="field"><label>분석 내용</label><textarea id="noteContent" rows="4" required placeholder="예: 다산점 상담 이탈율이 전월 대비 3%p 상승. 신규 상담 프로세스 점검 필요.">${escapeHtml(cur.content || "")}</textarea></div>
+            <div class="field">
+              <label>분석 내용</label>
+              ${richtextToolbarHtml("noteContent")}
+              <div class="richtext-edit has-toolbar" id="noteContent" contenteditable="true">${initialContentHtml}</div>
+            </div>
             <div class="field"><label>후속조치 (선택)</label><textarea id="noteFollowUp" rows="2" placeholder="예: 다음 원장 미팅 때 상담 프로세스 재점검 안건으로 올리기">${escapeHtml(cur.followUp || "")}</textarea></div>
             <div class="field">
               <label>사진 첨부 (선택)</label>
@@ -3443,6 +3459,7 @@ async function renderMetricAnalysis(section) {
         renderNoteThumbs();
         e.target.value = "";
       });
+      wireRichtextToolbarFor(document.getElementById("noteContent"), document.querySelector('.rt-toolbar[data-for="noteContent"]'));
       document.getElementById("cancelBtn").onclick = closeDrawer;
       document.getElementById("closeNoteDrawerBtn").onclick = closeDrawer;
       document.getElementById("metricNoteForm").addEventListener("submit", async (e) => {
@@ -3450,9 +3467,9 @@ async function renderMetricAnalysis(section) {
         const branchLabel = document.getElementById("noteBranch").value;
         const year = document.getElementById("noteYear").value;
         const month = document.getElementById("noteMonth").value;
-        const content = document.getElementById("noteContent").value.trim();
+        const content = sanitizeRichHtml(document.getElementById("noteContent").innerHTML);
         const followUp = document.getElementById("noteFollowUp").value.trim();
-        if (!content) return;
+        if (richTextIsEmpty(content)) { alert("분석 내용을 입력해주세요."); return; }
         const saveBtn = document.getElementById("saveNoteBtn");
         saveBtn.disabled = true;
         saveBtn.textContent = "저장 중...";
