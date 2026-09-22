@@ -3347,6 +3347,7 @@ async function renderMetricAnalysis(section) {
           <div style="font-size:11.5px;color:var(--text-muted);">${escapeHtml(n.createdBy || "")} · ${escapeHtml((n.createdAt || "").slice(0, 16).replace("T", " "))}</div>
         </div>
         <p style="white-space:pre-wrap;margin:10px 0 0;font-size:13.5px;line-height:1.6;">${escapeHtml(n.content || "")}</p>
+        ${renderAttachmentGallery((n.images || []).filter(Boolean))}
         ${n.followUp ? `<div style="margin-top:10px;padding:10px 12px;background:#F4FAEF;border-radius:8px;font-size:12.5px;"><strong>후속조치</strong><div style="white-space:pre-wrap;margin-top:4px;">${escapeHtml(n.followUp)}</div></div>` : ""}
         ${canEditMetricNote(n) ? `<div style="margin-top:10px;text-align:right;"><button class="icon-btn" data-edit-note="${n.id}">수정</button><button class="icon-btn danger" data-del-note="${n.id}">삭제</button></div>` : ""}
       </div>`).join("");
@@ -3386,6 +3387,7 @@ async function renderMetricAnalysis(section) {
     function openMetricNoteModal(existing, prefill) {
       const root = document.getElementById("modalRoot");
       const cur = existing || prefill || {};
+      const imageState = { urls: [...((cur && cur.images) || [])], files: [] };
       // 지표 표를 계속 보면서 기록할 수 있도록, 화면 전체를 가리는 팝업 대신 오른쪽에 붙는 서랍형 패널로 엽니다.
       root.innerHTML = `<div class="side-drawer" id="noteDrawer">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
@@ -3400,6 +3402,11 @@ async function renderMetricAnalysis(section) {
             <div class="field"><label>월 (선택 안 함 가능)</label><select id="noteMonth"><option value="">해당 없음</option>${months.map(m => `<option value="${escapeHtml(m)}" ${cur.month === m ? "selected" : ""}>${escapeHtml(m)}</option>`).join("")}</select></div>
             <div class="field"><label>분석 내용</label><textarea id="noteContent" rows="4" required placeholder="예: 다산점 상담 이탈율이 전월 대비 3%p 상승. 신규 상담 프로세스 점검 필요.">${escapeHtml(cur.content || "")}</textarea></div>
             <div class="field"><label>후속조치 (선택)</label><textarea id="noteFollowUp" rows="2" placeholder="예: 다음 원장 미팅 때 상담 프로세스 재점검 안건으로 올리기">${escapeHtml(cur.followUp || "")}</textarea></div>
+            <div class="field">
+              <label>사진 첨부 (선택)</label>
+              <div class="image-thumbs" id="noteImgThumbs"></div>
+              <input type="file" id="noteImgInput" accept="image/*" multiple>
+            </div>
             <div class="grid-2" style="margin-top:10px;">
               <button type="button" class="btn secondary" id="cancelBtn">취소</button>
               <button type="submit" class="btn" id="saveNoteBtn">저장</button>
@@ -3412,6 +3419,30 @@ async function renderMetricAnalysis(section) {
         document.getElementById("mainContent").classList.remove("with-side-drawer");
         root.innerHTML = "";
       };
+      function renderNoteThumbs() {
+        const wrap = document.getElementById("noteImgThumbs");
+        if (!wrap) return;
+        const items = [
+          ...imageState.urls.map((url, i) => ({ type: "url", src: url, i, isImage: isImageFile(url), name: fileNameFromUrl(url) })),
+          ...imageState.files.map((file, i) => ({ type: "file", src: URL.createObjectURL(file), i, isImage: file.type.startsWith("image/"), name: file.name }))
+        ];
+        wrap.innerHTML = items.length
+          ? items.map(it => `<div class="thumb-item"><img src="${it.src}"><button type="button" class="thumb-remove" data-type="${it.type}" data-i="${it.i}">×</button></div>`).join("")
+          : `<p style="font-size:12px;color:var(--text-muted);">첨부된 사진이 없습니다.</p>`;
+        wrap.querySelectorAll(".thumb-remove").forEach(btn => {
+          btn.onclick = () => {
+            const i = parseInt(btn.dataset.i, 10);
+            if (btn.dataset.type === "url") imageState.urls.splice(i, 1); else imageState.files.splice(i, 1);
+            renderNoteThumbs();
+          };
+        });
+      }
+      renderNoteThumbs();
+      document.getElementById("noteImgInput").addEventListener("change", (e) => {
+        imageState.files.push(...Array.from(e.target.files));
+        renderNoteThumbs();
+        e.target.value = "";
+      });
       document.getElementById("cancelBtn").onclick = closeDrawer;
       document.getElementById("closeNoteDrawerBtn").onclick = closeDrawer;
       document.getElementById("metricNoteForm").addEventListener("submit", async (e) => {
@@ -3424,12 +3455,21 @@ async function renderMetricAnalysis(section) {
         if (!content) return;
         const saveBtn = document.getElementById("saveNoteBtn");
         saveBtn.disabled = true;
+        saveBtn.textContent = "저장 중...";
         try {
+          const uploadedUrls = [];
+          for (const file of imageState.files) {
+            const path = `metricAnalysisNotes/${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name}`;
+            const fileRef = ref(storage, path);
+            await uploadBytes(fileRef, file);
+            uploadedUrls.push(await getDownloadURL(fileRef));
+          }
+          const images = [...imageState.urls, ...uploadedUrls];
           if (existing) {
-            await updateDoc(doc(db, "metricAnalysisNotes", existing.id), { branchLabel, year, month, content, followUp });
+            await updateDoc(doc(db, "metricAnalysisNotes", existing.id), { branchLabel, year, month, content, followUp, images });
           } else {
             await addDoc(collection(db, "metricAnalysisNotes"), {
-              folderId: section.folderId, branchLabel, year, month, content, followUp,
+              folderId: section.folderId, branchLabel, year, month, content, followUp, images,
               createdAt: new Date().toISOString(), createdBy: state.profile.name, createdByUid: state.user.uid
             });
           }
@@ -3439,6 +3479,7 @@ async function renderMetricAnalysis(section) {
           loadAndRenderMetricNotes();
         } catch (err) {
           saveBtn.disabled = false;
+          saveBtn.textContent = "저장";
           alert("저장 중 오류가 발생했습니다: " + err.message);
         }
       });
