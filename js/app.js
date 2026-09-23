@@ -3325,7 +3325,8 @@ async function renderMetricAnalysis(section) {
     document.getElementById("anomalyMetric").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
 
     document.getElementById("metricModeToggle").style.display = "flex";
-    setCompareMode("dash");
+    // 메뉴에서 "지표 분석"을 누르면 요약 대시보드가 아니라 "분석 기록"이 바로 보이게 합니다.
+    setCompareMode("note");
 
     // ---------- 분석 기록 ----------
     // "전체"(팀 전체 기준) 기록은 팀장/뷰어만 남길 수 있고, 원장님(팀원)은 자기 지점 기록만 남기고 볼 수 있습니다.
@@ -3545,6 +3546,7 @@ async function renderMetricAnalysis(section) {
       });
     }
     loadAndRenderMetricNotesG = loadAndRenderMetricNotes;
+    loadAndRenderMetricNotes(); // 화면이 "분석 기록"으로 기본 선택돼 있으므로, 처음 들어왔을 때 바로 불러옵니다.
     if (document.getElementById("addMetricNoteBtn")) {
       document.getElementById("addMetricNoteBtn").onclick = () => openMetricNoteModal(null);
     }
