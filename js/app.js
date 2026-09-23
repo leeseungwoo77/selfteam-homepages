@@ -3166,6 +3166,7 @@ async function renderMetricAnalysis(section) {
         </div>
         ${canWriteSection(section) ? `<button class="btn small" id="addMetricNoteBtn" type="button">+ 새 기록 남기기</button>` : ""}
       </div>
+      <div id="noteBranchFilterWrap" style="margin-top:10px;"></div>
       <div id="metricNotesWrap" style="margin-top:14px;">불러오는 중...</div>
     </div>
 
@@ -3329,6 +3330,32 @@ async function renderMetricAnalysis(section) {
     // ---------- 분석 기록 ----------
     // "전체"(팀 전체 기준) 기록은 팀장/뷰어만 남길 수 있고, 원장님(팀원)은 자기 지점 기록만 남기고 볼 수 있습니다.
     const noteBranchOptions = canViewAllRole() ? ["전체", ...branchOptionsFor(tabNames)] : branchOptionsFor(tabNames);
+    let noteBranchFilterValue = ""; // ""면 전체 보기
+    let lastLoadedNotes = []; // 지점 필터를 다시 걸 때 다시 불러오지 않도록 캐시해둡니다.
+    const noteFilterWrap = document.getElementById("noteBranchFilterWrap");
+    if (noteFilterWrap) {
+      noteFilterWrap.innerHTML = `<div class="field" style="max-width:220px;margin-bottom:0;">
+        <label style="font-size:11px;">지점별로 보기</label>
+        <select id="noteBranchFilterSelect"><option value="">전체 보기</option>${noteBranchOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}</select>
+      </div>`;
+      document.getElementById("noteBranchFilterSelect").addEventListener("change", (e) => {
+        noteBranchFilterValue = e.target.value;
+        renderMetricNotesList(lastLoadedNotes.filter(n => !noteBranchFilterValue || n.branchLabel === noteBranchFilterValue));
+      });
+    }
+    // 순서 변경(▲▼)은 팀장만 할 수 있게 해서, 여러 지점 기록이 섞인 목록에서 순서가 뒤엉키지 않게 합니다.
+    async function moveMetricNote(list, index, direction) {
+      const swapWith = direction === "up" ? index - 1 : index + 1;
+      if (swapWith < 0 || swapWith >= list.length) return;
+      const reordered = [...list];
+      [reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]];
+      try {
+        await Promise.all(reordered.map((n, i) => updateDoc(doc(db, "metricAnalysisNotes", n.id), { order: i })));
+        loadAndRenderMetricNotes();
+      } catch (err) {
+        alert("순서 변경 중 오류: " + err.message);
+      }
+    }
     function canEditMetricNote(n) {
       if (state.profile.role === "leader") return true;
       if (state.profile.role === "viewer") return false;
@@ -3338,7 +3365,8 @@ async function renderMetricAnalysis(section) {
       const wrap = document.getElementById("metricNotesWrap");
       if (!wrap) return;
       if (!notes.length) { wrap.innerHTML = `<div class="empty-state">아직 남긴 분석 기록이 없습니다.</div>`; return; }
-      wrap.innerHTML = notes.map(n => {
+      const canReorder = state.profile.role === "leader";
+      wrap.innerHTML = notes.map((n, i) => {
         // 예전에 남긴 기록은 줄글(순수 텍스트)로 저장돼 있고, 새로 남기는 기록은 서식 있는 글(HTML)로 저장됩니다.
         // 어떤 형태로 저장돼 있는지 자동으로 알아채서 알맞게 보여줍니다.
         const contentHtml = looksLikeRawHtmlText(n.content || "")
@@ -3347,6 +3375,10 @@ async function renderMetricAnalysis(section) {
         return `<div class="card" style="margin-bottom:12px;">
         <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            ${canReorder ? `<span style="display:flex;flex-direction:column;">
+              <button class="icon-btn" style="padding:0;line-height:1.1;font-size:10px;" data-move-note="up" data-move-index="${i}" ${i === 0 ? "disabled" : ""}>▲</button>
+              <button class="icon-btn" style="padding:0;line-height:1.1;font-size:10px;" data-move-note="down" data-move-index="${i}" ${i === notes.length - 1 ? "disabled" : ""}>▼</button>
+            </span>` : ""}
             <span class="pill normal">${escapeHtml(n.branchLabel || "전체")}</span>
             <span style="font-weight:700;font-size:13px;">${escapeHtml(n.year || "")}${n.month ? " " + escapeHtml(n.month) : ""}</span>
           </div>
@@ -3373,6 +3405,9 @@ async function renderMetricAnalysis(section) {
           }
         };
       });
+      wrap.querySelectorAll("[data-move-note]").forEach(btn => {
+        btn.onclick = () => moveMetricNote(notes, parseInt(btn.dataset.moveIndex, 10), btn.dataset.moveNote);
+      });
     }
     async function loadAndRenderMetricNotes() {
       const wrap = document.getElementById("metricNotesWrap");
@@ -3385,8 +3420,16 @@ async function renderMetricAnalysis(section) {
         if (!canViewAllRole()) {
           notes = notes.filter(n => n.branchLabel === "전체" || n.branchLabel === state.profile.branchName);
         }
-        notes.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-        renderMetricNotesList(notes);
+        // 팀장이 순서를 직접 바꿔둔 기록(order 있음)이 위로 오고, 그 안에서는 지정한 순서대로,
+        // 아직 순서를 바꾼 적 없는 기록들은 그 뒤에 최신순으로 붙습니다.
+        notes.sort((a, b) => {
+          const oa = a.order !== undefined ? a.order : Infinity;
+          const ob = b.order !== undefined ? b.order : Infinity;
+          if (oa !== ob) return oa - ob;
+          return (b.createdAt || "").localeCompare(a.createdAt || "");
+        });
+        lastLoadedNotes = notes;
+        renderMetricNotesList(notes.filter(n => !noteBranchFilterValue || n.branchLabel === noteBranchFilterValue));
       } catch (err) {
         wrap.innerHTML = `<div class="empty-state">불러오는 중 오류: ${escapeHtml(err.message)}</div>`;
       }
