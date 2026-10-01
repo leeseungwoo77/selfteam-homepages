@@ -204,16 +204,18 @@ function scheduleRowKey(kind) { return kind; } // "location" | "note_에듀본�
 const SCHEDULE_KEYWORD_RULES = [
   { word: "연차", bg: "#000000", color: "#fff" },
   { word: "반차", bg: "#E5E5E5", color: "#000" },
-  { word: "회의", bg: "#E8938C", color: "#fff" },
   { word: "식사", bg: "#BFBFBF", color: "#000" },
   { word: "생일", bg: "#8E44AD", color: "#fff" },
   { word: "이동", bg: "#F0E4C8", color: "#000" },
   { word: "휴무", bg: "#FFFFFF", color: "#E03C3C" },
   { word: "코칭", bg: "#00897B", color: "#fff" }
 ];
+// "회의"/"미팅"은 지점명보다 우선순위가 낮습니다. (예: "행당 팀원 미팅" → 행당 고유색이 먼저 적용되어야 함)
+const SCHEDULE_MEETING_RULE = { words: ["회의", "미팅"], bg: "#E8938C", color: "#fff" };
 function computeScheduleCellStyle(text, explicitColor, explicitTextColor) {
-  // 지점명이나 "연차/회의/식사" 같은 키워드가 글자에 들어있으면, 예전에 지정해둔(또는 붙여넣기로 딸려온)
+  // 지점명이나 "연차/반차/식사" 같은 키워드가 글자에 들어있으면, 예전에 지정해둔(또는 붙여넣기로 딸려온)
   // 수동 색상이 남아있어도 자동 서식이 항상 우선 적용되도록 합니다.
+  // 우선순위: ① 위 키워드들 → ② 지점명(돈암/행당/별내/다산/진학 등) → ③ "회의"/"미팅" → ④ 수동 지정 색상.
   if (text) {
     for (const rule of SCHEDULE_KEYWORD_RULES) {
       if (text.includes(rule.word)) return { bg: rule.bg, color: rule.color };
@@ -222,6 +224,9 @@ function computeScheduleCellStyle(text, explicitColor, explicitTextColor) {
     if (autoBg) {
       const autoTextColor = matchLocationTextColor(text);
       return { bg: autoBg, color: autoTextColor || "#fff" };
+    }
+    if (SCHEDULE_MEETING_RULE.words.some(w => text.includes(w))) {
+      return { bg: SCHEDULE_MEETING_RULE.bg, color: SCHEDULE_MEETING_RULE.color };
     }
   }
   if (explicitColor || explicitTextColor) {
