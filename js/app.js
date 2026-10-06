@@ -2880,6 +2880,23 @@ function stddevOf(arr) {
 function fmtMetricNum(n) {
   return n === null || n === undefined ? "-" : (Math.abs(n) < 5 && Math.abs(n) > 0 ? n.toFixed(3) : n.toLocaleString(undefined, { maximumFractionDigits: 1 }));
 }
+// "증감" 칸에서 지표별로 소수점 자리수를 고정해서 보여주고 싶은 경우의 설정입니다.
+// (예: 전체종료/월말학생수/온리개별지도는 정수만, 초기이탈율/상담관리이탈율은 소수 1자리까지)
+const METRIC_DIFF_DECIMALS = {
+  "전체종료": 0,
+  "월말학생수": 0,
+  "온리개별지도": 0,
+  "초기이탈율": 1,
+  "상담관리이탈율": 1
+};
+function fmtMetricDiff(name, diff) {
+  if (diff === null || diff === undefined) return "-";
+  const decimals = METRIC_DIFF_DECIMALS[name];
+  if (decimals !== undefined) {
+    return Math.abs(diff).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  }
+  return fmtMetricNum(Math.abs(diff));
+}
 function renderLineChartSVG(seriesList, opts) {
   opts = opts || {};
   const width = opts.width || 900, height = opts.height || 260;
@@ -3890,7 +3907,7 @@ async function renderMetricAnalysis(section) {
           <td style="font-weight:700;">${escapeHtml(name)}</td>
           <td>${valAtext}</td>
           <td>${valBtext}</td>
-          <td class="mono" style="color:${tone};font-weight:700;">${diff !== null ? `${arrow} ${fmtMetricNum(Math.abs(diff))}` : "-"}</td>
+          <td class="mono" style="color:${tone};font-weight:700;">${diff !== null ? `${arrow} ${fmtMetricDiff(name, diff)}` : "-"}</td>
           <td class="mono" style="color:${tone};font-weight:700;">${pct !== null ? `${arrow} ${Math.abs(pct).toFixed(1)}%` : "-"}</td>
         </tr>`;
       }).join("")}
@@ -3909,7 +3926,7 @@ async function renderMetricAnalysis(section) {
         return `<tr>
           <td style="font-weight:700;">${escapeHtml(r.name)}</td>
           ${r.values.map(v => `<td>${v}</td>`).join("")}
-          <td class="mono" style="color:${tone};font-weight:700;">${r.diff !== null ? `${arrow} ${fmtMetricNum(Math.abs(r.diff))}` : "-"}</td>
+          <td class="mono" style="color:${tone};font-weight:700;">${r.diff !== null ? `${arrow} ${fmtMetricDiff(r.name, r.diff)}` : "-"}</td>
           <td class="mono" style="color:${tone};font-weight:700;">${r.pct !== null ? `${arrow} ${Math.abs(r.pct).toFixed(1)}%` : "-"}</td>
         </tr>`;
       }).join("")}
