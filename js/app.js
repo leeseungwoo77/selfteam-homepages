@@ -263,6 +263,7 @@ async function renderMonthlySchedule(section) {
         <button class="icon-btn" id="prevMonthBtn" style="font-size:18px;">‹</button>
         <span id="monthLabel" style="font-weight:800;font-size:15px;min-width:110px;text-align:center;"></span>
         <button class="icon-btn" id="nextMonthBtn" style="font-size:18px;">›</button>
+        <button class="btn small secondary" id="scheduleExportBtn" type="button">⬇ 엑셀로 다운로드</button>
       </div>
     </div>
     ${canEdit ? `<div class="card" style="padding:12px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
@@ -323,6 +324,8 @@ async function renderMonthlySchedule(section) {
     }
     return `<td style="${cellBase}${bgStyle}${extra}padding:5px 10px;border-radius:4px;">${escapeHtml(cell.text)}</td>`;
   }
+
+  document.getElementById("scheduleExportBtn").onclick = () => exportScheduleToExcel(year, month, dates, getCellValue);
 
   let html = `<table class="table-compact" style="width:max-content;border-collapse:separate;border-spacing:0;table-layout:fixed;">
     <colgroup>
@@ -592,6 +595,72 @@ async function renderMonthlySchedule(section) {
       commitFormat((existing, text) => ({ text, color: null, textColor: null }));
     };
   }
+}
+
+// 팀장 일정(월 단위 표)을 화면에 보이는 색깔 그대로 엑셀(.xlsx) 파일로 내려받습니다.
+function hexToArgb(hex) {
+  if (!hex) return null;
+  const h = hex.replace("#", "").toUpperCase();
+  return "FF" + (h.length === 3 ? h.split("").map(c => c + c).join("") : h);
+}
+async function exportScheduleToExcel(year, month, dates, getCellValue) {
+  if (typeof ExcelJS === "undefined") {
+    alert("엑셀 내보내기 기능을 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침 후 다시 시도해주세요.");
+    return;
+  }
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet(`${year}년 ${month}월`.slice(0, 31));
+
+  const headerRow = sheet.addRow(["날짜", ...dates.map(d => `${month}.${pad2(d)}(${weekdayLabel(year, month, d)})`)]);
+  headerRow.eachCell((cell, colNumber) => {
+    cell.font = { bold: true };
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    if (colNumber > 1) {
+      const wd = weekdayLabel(year, month, dates[colNumber - 2]);
+      if (wd === "토") cell.font = { bold: true, color: { argb: hexToArgb("#1565C0") } };
+      else if (wd === "일") cell.font = { bold: true, color: { argb: hexToArgb("#E03C3C") } };
+    }
+  });
+
+  function addRow(label, rowKey, labelBg, labelTextColor) {
+    const row = sheet.addRow([label, ...dates.map(d => getCellValue(ymd(year, month, d), rowKey).text)]);
+    const labelCell = row.getCell(1);
+    labelCell.font = { bold: true, color: { argb: hexToArgb(labelTextColor || "#000000") } };
+    if (labelBg) labelCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: hexToArgb(labelBg) } };
+    dates.forEach((d, i) => {
+      const cellRef = row.getCell(i + 2);
+      cellRef.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      const cellData = getCellValue(ymd(year, month, d), rowKey);
+      const { bg, color } = computeScheduleCellStyle(cellData.text, cellData.color, cellData.textColor);
+      if (bg) {
+        cellRef.fill = { type: "pattern", pattern: "solid", fgColor: { argb: hexToArgb(bg) } };
+        cellRef.font = { bold: true, color: { argb: hexToArgb(color || "#ffffff") } };
+      }
+    });
+  }
+
+  addRow("근무장소", "location", null, "#000000");
+  SCHEDULE_NOTE_ROWS.forEach(rowLabel => {
+    addRow(rowLabel, "note_" + rowLabel, LOCATION_COLORS[rowLabel] || "#9CA88F", LOCATION_TEXT_COLORS[rowLabel] || "#ffffff");
+  });
+  SCHEDULE_TIME_SLOTS.forEach(slot => {
+    addRow(slot, "time_" + slot, null, "#000000");
+  });
+
+  sheet.getColumn(1).width = 14;
+  for (let i = 2; i <= dates.length + 1; i++) sheet.getColumn(i).width = 13;
+  sheet.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
+
+  const buf = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `팀장일정_${year}년${pad2(month)}월.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function rgbStringToHex(rgbStr) {
