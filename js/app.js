@@ -4657,7 +4657,17 @@ function openModal(section, existing, prefill) {
       }
       if (section.scope === "custom") {
         data.folderId = section.folderId;
-        if (!existing) data.order = Date.now();
+        // 새 게시물은 지금 등록된 것들 중 가장 작은 order보다 더 작은 값을 매겨서,
+        // 목록 맨 앞(최신순 맨 위)에 오도록 합니다. (예전엔 Date.now()를 넣어서 반대로 맨 뒤로 가던 버그)
+        if (!existing) {
+          try {
+            const existingDocs = await fetchDocs(section);
+            const orders = existingDocs.map(d => d.order).filter(v => typeof v === "number");
+            data.order = orders.length ? Math.min(...orders) - 1 : 0;
+          } catch (err) {
+            data.order = 0;
+          }
+        }
       }
       // 원장 미팅(이사님 검토)은 "+ 새로 등록"으로 만든 완전히 새 제목의 줄이면 맨 위로 오도록,
       // 현재 등록된 줄들 중 가장 작은 rowOrder보다 더 작은 값을 매겨둡니다. (제목이 이미 있던 줄에 지점만 추가하는 경우는 그대로 둡니다)
