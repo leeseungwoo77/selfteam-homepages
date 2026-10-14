@@ -908,7 +908,7 @@ function folderToSection(folder) {
     return { ...base, isRoutineChecklist: true, desc: folder.desc || "팀장 업무 매뉴얼의 반복 업무를 일간·주간·월간·분기·반기·연간으로 나눠 체크하고, 주기별 완료율을 관리합니다." };
   }
   if (folder.template === "teamDiagnosis") {
-    return { ...base, isTeamDiagnosis: true, desc: folder.desc || "지점별 팀 발달 단계와 건강도, 원장 7대 업무 숙련도(=위임 수준)를 월별로 진단합니다." };
+    return { ...base, isTeamDiagnosis: true, desc: folder.desc || "지점별 팀 발달 단계와 건강도, 회사 성장 단계(그라이너), 원장 7대 업무 숙련도(=위임 수준)를 월별로 진단합니다." };
   }
   if (folder.template === "taskTracking") {
     return { ...base, isTaskTracking: true, desc: folder.desc || "팀장이 각 지점 원장님에게 동일하게 내린 업무 지시를 지점별로 체크하고, 완료율·마감기한을 관리합니다." };
@@ -5699,6 +5699,57 @@ const TD_SCALE = [
   { v: 4, label: "점검 위임", bg: "#5B7FD6", fg: "#FFFFFF" },
   { v: 5, label: "완전 위임", bg: "#24408E", fg: "#FFFFFF" }
 ];
+// 회사 성장 단계 (그라이너 모델) 체크리스트 — branches.{지점키}.growth.{문항id}: true
+const TD_GROWTH = [
+  { stage: 1, name: "창의성", color: "#9A6B3E", next: "지시", items: [
+    { id: "g1f1", type: "f", name: "원장 직접 상담", desc: "신규 상담·등록을 원장이 거의 전부 직접 한다" },
+    { id: "g1f2", type: "f", name: "매뉴얼 부재", desc: "운영 매뉴얼·업무분장이 문서로 없거나 지켜지지 않는다" },
+    { id: "g1f3", type: "f", name: "구두 소통", desc: "매니저와의 소통이 구두·즉흥 지시 중심이다" },
+    { id: "g1c1", type: "c", name: "원장 부재 시 흔들림", desc: "원장이 며칠만 빠져도 운영이 흔들린다" },
+    { id: "g1c2", type: "c", name: "원장 번아웃", desc: "야근 일상화, 짜증, 결정 지연 같은 신호가 보인다" }
+  ]},
+  { stage: 2, name: "지시", color: "#B0892E", next: "위임", items: [
+    { id: "g2f1", type: "f", name: "표준 프로세스", desc: "주간 회의, 학생관리 루틴이 정착돼 있다" },
+    { id: "g2f2", type: "f", name: "업무분장 명확", desc: "매니저별 업무분장이 명확하다" },
+    { id: "g2f3", type: "f", name: "원장 단일 창구", desc: "학부모 이슈의 최종 창구는 항상 원장이다" },
+    { id: "g2c1", type: "c", name: "작은 결정도 질문", desc: "매니저가 작은 결정도 대부분 원장에게 묻는다" },
+    { id: "g2c2", type: "c", name: "성장 정체", desc: "개선 제안이 적고, 퇴사 사유에 '성장 정체'가 나온다" }
+  ]},
+  { stage: 3, name: "위임", color: "#4F8A5B", next: "조정", items: [
+    { id: "g3f1", type: "f", name: "중간 리더 권한", desc: "교실장 등이 상담·학생관리 결정 권한을 실제로 가진다" },
+    { id: "g3f2", type: "f", name: "원장 부재에도 유지", desc: "원장이 1주일 비워도 운영이 유지된다" },
+    { id: "g3f3", type: "f", name: "매니저 재량", desc: "매니저가 자기 재량으로 학생관리 방식을 정한다" },
+    { id: "g3c1", type: "c", name: "지표 편차 큼", desc: "이탈율·담당 학생수가 매니저마다 편차가 크다" },
+    { id: "g3c2", type: "c", name: "이슈 뒤늦은 파악", desc: "원장이 학생·학부모 이슈를 뒤늦게 파악한다" }
+  ]},
+  { stage: 4, name: "조정", color: "#5A5F8F", next: "협력", items: [
+    { id: "g4f1", type: "f", name: "지표 기반 관리", desc: "지표 대시보드와 정기 리뷰로 운영한다" },
+    { id: "g4f2", type: "f", name: "평가·보상 공식화", desc: "매니저 평가·보상 기준이 공식화돼 있다" },
+    { id: "g4f3", type: "f", name: "본부 표준 준수", desc: "본부 표준과 규정을 충실히 따른다" },
+    { id: "g4c1", type: "c", name: "서류가 시간 잠식", desc: "보고·서류 업무가 학생관리 시간을 잠식한다" },
+    { id: "g4c2", type: "c", name: "새 시도 없음", desc: "1년간 새 시도가 거의 없고 '원래 이렇게 해왔다'가 잦다" }
+  ]}
+];
+
+// 판정: 특징 O가 가장 많은 단계 = 현재 단계(인접 동률은 전환기), 현재 단계 위기 2개 모두 O = 전환 시점, 앞 단계 위기 O = 주의
+function tdGrowthJudge(g) {
+  g = g || {};
+  const feat = TD_GROWTH.map(s => s.items.filter(i => i.type === "f" && g[i.id]).length);
+  const max = Math.max(...feat);
+  if (!max) return null;
+  const tops = feat.map((n, i) => n === max ? i : -1).filter(i => i >= 0);
+  const cur = tops[tops.length - 1];
+  const s = TD_GROWTH[cur];
+  let label = tops.length === 2 && tops[1] - tops[0] === 1
+    ? `${tops[0] + 1}→${tops[1] + 1}단계 전환기`
+    : `${s.stage}단계 ${s.name}`;
+  const notes = [];
+  if (s.items.filter(i => i.type === "c").every(i => g[i.id])) notes.push(`→ ${s.next} 단계 전환 시점`);
+  const left = TD_GROWTH.slice(0, cur).filter(p => p.items.some(i => i.type === "c" && g[i.id])).map(p => p.stage);
+  if (left.length) notes.push(`⚠ ${left.join("·")}단계 위기 잔존`);
+  return { label, color: s.color, notes, feat };
+}
+
 const tdViewState = {}; // section.key -> { round }
 
 function tdBranches() { return TD_TEAMS.flatMap(t => t.branches.map(b => ({ ...b, team: t.id }))); }
@@ -5758,6 +5809,15 @@ function tdGuideHtml() {
         ${TD_SCALE.map(s => `<div style="background:${s.bg};color:${s.fg};border-radius:6px;padding:6px 4px;text-align:center;font-size:12px;line-height:1.35;"><b style="display:block;font-size:15px;">${s.v}</b>${s.label}</div>`).join("")}
       </div>
       <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-top:4px;"><span>팀장 관여 많음</span><span>위임 많음</span></div>
+    </div>
+    <div class="card" style="margin:0;padding:14px 16px;">
+      <div style="font-weight:800;font-size:13.5px;margin-bottom:8px;">회사 성장 단계(그라이너): 각 단계의 성공 방식이 다음 단계의 위기를 만든다</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+        ${TD_GROWTH.map(s => `<span style="font-size:12px;padding:3px 8px;border-radius:999px;background:${s.color};color:#fff;font-weight:700;">${s.stage}. ${s.name}</span>`).join("")}
+      </div>
+      <div style="font-size:12.5px;color:var(--text-muted);line-height:1.55;">
+        해당 문항에 O를 표시합니다. <b style="color:var(--text-main);">특징</b> O가 가장 많은 단계가 현재 단계이고, 그 단계의 <b style="color:var(--text-main);">위기</b> 2개가 모두 O면 다음 단계로 넘어갈 때입니다. 앞 단계 위기가 남아 있으면 그것부터 해결합니다.
+      </div>
     </div>
   </div>`;
 }
@@ -5834,6 +5894,35 @@ function tdRenderGrid(section, data) {
     return `<td colspan="${b.leaders.length}" style="${cell}font-weight:800;padding:8px 4px;">${tdAvg(TD_HEALTH.map(h => hs[h.id]))}</td>`;
   }).join("")}<td style="${cell}"></td></tr>`;
 
+  // 회사 성장 단계 (그라이너)
+  html += sectionRow("회사 성장 단계 진단 (그라이너 모델, 지점 단위 · 해당하면 O)");
+  TD_GROWTH.forEach(s => {
+    s.items.forEach((it, idx) => {
+      const tag = it.type === "f"
+        ? `<span style="font-size:10.5px;font-weight:800;padding:1px 6px;border-radius:4px;background:${s.color};color:#fff;margin-right:6px;">${s.stage}단계 특징</span>`
+        : `<span style="font-size:10.5px;font-weight:800;padding:1px 6px;border-radius:4px;border:1px solid #C9483B;color:#C9483B;margin-right:6px;">${s.stage}단계 위기</span>`;
+      const topBorder = idx === 0 ? "border-top:2px solid var(--border);" : "";
+      html += `<tr><th style="${rowHead}${topBorder}">${tag}${it.name}<small style="display:block;font-weight:400;color:var(--text-muted);font-size:11.5px;margin-top:2px;">${it.desc}</small></th>`;
+      branches.forEach(b => {
+        const on = !!(((bd[b.id] || {}).growth || {})[it.id]);
+        const onStyle = it.type === "f" ? `background:${s.color};color:#fff;` : "background:#FBE3E0;color:#C9483B;";
+        html += `<td colspan="${b.leaders.length}" style="${cell}${topBorder}">
+          <button type="button" data-td-growth="${b.id}" data-item="${it.id}" ${canEdit ? "" : "disabled"} aria-pressed="${on}" aria-label="${escapeHtml(b.name)} ${it.name}"
+            style="all:unset;box-sizing:border-box;display:flex;width:100%;min-height:38px;align-items:center;justify-content:center;cursor:${canEdit ? "pointer" : "default"};font-size:14px;font-weight:800;${on ? onStyle : "color:#B9C0CC;"}">${on ? "O" : "·"}</button></td>`;
+      });
+      html += `<td style="${cell}${topBorder}"></td></tr>`;
+    });
+  });
+  html += `<tr><th style="${rowHead}border-top:2px solid var(--border);">성장 단계 판정<small style="display:block;font-weight:400;color:var(--text-muted);font-size:11.5px;">자동 계산 · 특징 O 수(1/2/3/4단계)</small></th>${branches.map(b => {
+    const j = tdGrowthJudge((bd[b.id] || {}).growth);
+    const body = j
+      ? `<b style="display:inline-block;padding:2px 8px;border-radius:999px;background:${j.color};color:#fff;font-size:12px;">${j.label}</b>
+         <small style="display:block;color:var(--text-muted);margin-top:3px;">${j.feat.join(" / ")}</small>
+         ${j.notes.map(n => `<small style="display:block;font-weight:700;color:${n.startsWith("⚠") ? "#C9483B" : "var(--text-main)"};margin-top:2px;">${n}</small>`).join("")}`
+      : `<span style="color:var(--text-muted);">–</span>`;
+    return `<td colspan="${b.leaders.length}" style="${cell}border-top:2px solid var(--border);padding:8px 4px;font-size:12.5px;">${body}</td>`;
+  }).join("")}<td style="${cell}border-top:2px solid var(--border);"></td></tr>`;
+
   // 원장 7대 업무
   html += sectionRow("원장 7대 업무 숙련도 (1–5)");
   TD_TASKS.forEach(t => {
@@ -5866,6 +5955,13 @@ function tdRenderGrid(section, data) {
       const bid = btn.dataset.tdStage;
       const on = (bd[bid] || {}).stage === btn.dataset.stage;
       tdSave(section, { branches: { [bid]: { stage: on ? null : btn.dataset.stage } } });
+    };
+  });
+  wrap.querySelectorAll("[data-td-growth]").forEach(btn => {
+    btn.onclick = () => {
+      const bid = btn.dataset.tdGrowth;
+      const on = !!(((bd[bid] || {}).growth || {})[btn.dataset.item]);
+      tdSave(section, { branches: { [bid]: { growth: { [btn.dataset.item]: on ? null : true } } } });
     };
   });
   wrap.querySelectorAll("[data-td-health]").forEach(sel => {
