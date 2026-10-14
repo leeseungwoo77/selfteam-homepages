@@ -907,6 +907,9 @@ function folderToSection(folder) {
   if (folder.template === "routineChecklist") {
     return { ...base, isRoutineChecklist: true, desc: folder.desc || "팀장 업무 매뉴얼의 반복 업무를 일간·주간·월간·분기·반기·연간으로 나눠 체크하고, 주기별 완료율을 관리합니다." };
   }
+  if (folder.template === "teamDiagnosis") {
+    return { ...base, isTeamDiagnosis: true, desc: folder.desc || "지점별 팀 발달 단계와 건강도, 원장 7대 업무 숙련도(=위임 수준)를 월별로 진단합니다." };
+  }
   if (folder.template === "taskTracking") {
     return { ...base, isTaskTracking: true, desc: folder.desc || "팀장이 각 지점 원장님에게 동일하게 내린 업무 지시를 지점별로 체크하고, 완료율·마감기한을 관리합니다." };
   }
@@ -1105,6 +1108,7 @@ async function renderSection(key) {
   if (section.isRosterGrid) { renderRosterGrid(section); return; }
   if (section.isTaskTracking) { renderTaskTracking(section); return; }
   if (section.isRoutineChecklist) { renderRoutineChecklist(section); return; }
+  if (section.isTeamDiagnosis) { renderTeamDiagnosis(section); return; }
   if (section.isMeetingGrid) { renderMeetingGrid(section); return; }
   if (section.isMemberLog) { renderMemberMeetingLog(section); return; }
   if (section.cardView) { renderFolderGrid(section); return; }
@@ -5337,11 +5341,12 @@ function openMenuEditModal(item) {
         ${permissionHtml}
         ${item.isCustom ? `<div class="field"><label>양식 종류</label>
           <select id="menuEditTemplate">
-            <option value="standard" ${item.template !== "okr" && item.template !== "metricAnalysis" && item.template !== "taskTracking" && item.template !== "routineChecklist" ? "selected" : ""}>일반 (제목 + 내용 + 이미지)</option>
+            <option value="standard" ${item.template !== "okr" && item.template !== "metricAnalysis" && item.template !== "taskTracking" && item.template !== "routineChecklist" && item.template !== "teamDiagnosis" ? "selected" : ""}>일반 (제목 + 내용 + 이미지)</option>
             <option value="okr" ${item.template === "okr" ? "selected" : ""}>OKR (시즌 · Objective · KR · KT)</option>
             <option value="metricAnalysis" ${item.template === "metricAnalysis" ? "selected" : ""}>지표 분석 (연결된 구글 시트에서 두 시점 비교)</option>
             <option value="taskTracking" ${item.template === "taskTracking" ? "selected" : ""}>업무 트레킹 (지점별 지시 체크리스트 · 완료율 · 마감기한)</option>
             <option value="routineChecklist" ${item.template === "routineChecklist" ? "selected" : ""}>팀장 업무 체크리스트 (일간~연간 주기별 칸반 · 완료율)</option>
+            <option value="teamDiagnosis" ${item.template === "teamDiagnosis" ? "selected" : ""}>원장 팀 진단 (팀 단계 · 지점 건강도 · 원장 7대 업무 위임 수준)</option>
           </select>
           <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">이미 등록된 게시물이 있는 상태에서 종류를 바꾸면 예전 글이 새 양식으로 안 보일 수 있어요.</p>
         </div>` : ""}
@@ -5431,6 +5436,7 @@ async function renderAdmin() {
             <option value="metricAnalysis">지표 분석 (연결된 구글 시트에서 두 시점 비교)</option>
             <option value="taskTracking">업무 트레킹 (지점별 지시 체크리스트 · 완료율 · 마감기한)</option>
             <option value="routineChecklist">팀장 업무 체크리스트 (일간~연간 주기별 칸반 · 완료율)</option>
+            <option value="teamDiagnosis">원장 팀 진단 (팀 단계 · 지점 건강도 · 원장 7대 업무 위임 수준)</option>
           </select>
         </div>
         <button class="btn" type="submit" style="grid-column: span 2;">폴더 만들기</button>
@@ -5558,6 +5564,254 @@ window.cycleMeetingImgZoom = function (img) {
   else if (level === 2) img.classList.add("zoomed-more");
   img.parentElement.classList.toggle("full", level > 0);
 };
+
+/* ===========================================================
+   원장 팀 진단 툴킷 (사용자 정의 폴더 양식: teamDiagnosis)
+   - 진단 회차(월) 1개 = folderEntries 문서 1개 (kind:"teamDiag", 문서 ID = 폴더ID_td_YYYY-MM)
+   - branches.{지점키}: { stage, health:{항목:1~5}, note }
+   - leaders.{원장키}: { scores:{업무:1~5} }
+   - 지우기는 null 로 저장 (setDoc merge 로 다른 칸은 그대로 유지)
+   - folderEntries 규칙을 그대로 쓰므로 Firestore 규칙 변경은 필요 없습니다.
+=========================================================== */
+const TD_TEAMS = [
+  { id: "soul", name: "소울팀", bg: "#F7CFCB", branches: [
+    { id: "junggye", name: "중계", leaders: [{ id: "junggye-han", name: "한성호" }, { id: "junggye-woo", name: "우규하" }] },
+    { id: "sanggye", name: "상계", leaders: [{ id: "sanggye-kim", name: "김광수" }] },
+    { id: "hagye", name: "하계", leaders: [{ id: "hagye-kim", name: "김지영" }] },
+    { id: "gireum", name: "길음", leaders: [{ id: "gireum-kim", name: "김병수" }] },
+    { id: "jeonnong", name: "전농", leaders: [{ id: "jeonnong-shin", name: "신지혜" }] }
+  ]},
+  { id: "self", name: "셀프팀", bg: "#CCDCF7", branches: [
+    { id: "donam", name: "돈암", leaders: [{ id: "donam-lee", name: "이유민" }] },
+    { id: "haengdang", name: "행당", leaders: [{ id: "haengdang-yoon", name: "윤서연" }] },
+    { id: "dasan", name: "다산", leaders: [{ id: "dasan-jeon", name: "전광수" }] },
+    { id: "byeollae", name: "별내", leaders: [{ id: "byeollae-park", name: "박은별" }] },
+    { id: "jinhak", name: "진학입시센터", leaders: [{ id: "jinhak-kim", name: "김정서" }, { id: "jinhak-hong", name: "홍다혜" }] }
+  ]}
+];
+const TD_STAGES = [
+  { id: "forming", name: "형성기", color: "#7C8798", desc: "서로 탐색 중. 리더 의존이 크고 역할이 흐릿하다." },
+  { id: "storming", name: "혼란기", color: "#D9692B", desc: "갈등과 역할 충돌이 드러난다. 개입이 가장 필요하다." },
+  { id: "norming", name: "규범기", color: "#1F8A78", desc: "일하는 방식과 역할에 합의하고 협력이 자리 잡는다." },
+  { id: "performing", name: "성과기", color: "#2F55D4", desc: "팀이 스스로 굴러가고 과제와 성과에 집중한다." }
+];
+const TD_HEALTH = [
+  { id: "goal", name: "목표 명확성", desc: "지점 목표를 모두가 같은 말로 설명한다" },
+  { id: "role", name: "역할 명확성", desc: "누가 무엇을 맡고 결정하는지 안다" },
+  { id: "trust", name: "신뢰", desc: "서로 믿고 도움을 청한다" },
+  { id: "conflict", name: "갈등 처리", desc: "이견을 숨기지 않고 다룬다" },
+  { id: "results", name: "성과 공유", desc: "지표와 성과를 함께 보고 이야기한다" }
+];
+const TD_TASKS = [
+  { id: "philosophy", name: "철학(마인드)" },
+  { id: "self", name: "셀프 업무(지표 활용)" },
+  { id: "acquisition", name: "신규 유입(홍보 마케팅)" },
+  { id: "consult", name: "등록 상담(초기 세팅)" },
+  { id: "hr", name: "인사(면접 채용)" },
+  { id: "managing", name: "매니징(팀원 관리)" },
+  { id: "program", name: "프로그램 운영(퀄리티 향상)" }
+];
+const TD_SCALE = [
+  { v: 1, label: "직접 지도", bg: "#EEF2FB", fg: "#1B2440" },
+  { v: 2, label: "함께 수행", bg: "#D3DDF6", fg: "#1B2440" },
+  { v: 3, label: "지원", bg: "#A8BCEC", fg: "#1B2440" },
+  { v: 4, label: "점검 위임", bg: "#5B7FD6", fg: "#FFFFFF" },
+  { v: 5, label: "완전 위임", bg: "#24408E", fg: "#FFFFFF" }
+];
+const tdViewState = {}; // section.key -> { round }
+
+function tdBranches() { return TD_TEAMS.flatMap(t => t.branches.map(b => ({ ...b, team: t.id }))); }
+function tdLeaders() { return tdBranches().flatMap(b => b.leaders.map(l => ({ ...l, branch: b.id }))); }
+function tdThisMonth() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; }
+function tdDocId(section, round) { return `${section.folderId}_td_${round}`; }
+function tdAvg(vals) { const v = vals.filter(x => typeof x === "number" && x > 0); return v.length ? (v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : "-"; }
+function tdCellStyle(v) { const s = TD_SCALE.find(x => x.v === v); return s ? `background:${s.bg};color:${s.fg};` : ""; }
+
+async function tdLoad(section, round) {
+  try {
+    const snap = await getDoc(doc(db, "folderEntries", tdDocId(section, round)));
+    return snap.exists() ? snap.data() : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+async function renderTeamDiagnosis(section) {
+  const main = document.getElementById("mainContent");
+  const view = tdViewState[section.key] || (tdViewState[section.key] = { round: tdThisMonth() });
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <p>${section.desc}</p>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);font-weight:700;">진단 회차
+        <input type="month" id="tdRound" value="${view.round}" style="font:inherit;padding:6px 10px;border:1px solid var(--border);border-radius:8px;">
+      </label>
+    </div>
+    <div id="tdGuide"></div>
+    <div id="tdDist" style="margin-bottom:14px;"></div>
+    <div class="card" style="padding:0;overflow-x:auto;"><div id="tdGridWrap" style="padding:16px;">불러오는 중...</div></div>
+    <p style="font-size:12px;color:var(--text-muted);">칸을 고르면 바로 저장됩니다. 회차(월)를 바꾸면 그 달의 진단을 따로 기록합니다.</p>`;
+  document.getElementById("tdGuide").innerHTML = tdGuideHtml();
+  document.getElementById("tdRound").onchange = (e) => {
+    if (!/^\d{4}-\d{2}$/.test(e.target.value)) return;
+    view.round = e.target.value;
+    tdRefresh(section);
+  };
+  tdRefresh(section);
+}
+
+function tdGuideHtml() {
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:14px;">
+    <div class="card" style="margin:0;padding:14px 16px;">
+      <div style="font-weight:800;font-size:13.5px;margin-bottom:8px;">팀 단계: 단계가 높을수록 '팀 자체'보다 '과제'에 힘을 싣는다</div>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;">
+        ${TD_STAGES.map(s => `<div style="display:flex;gap:8px;font-size:12.5px;color:var(--text-muted);">
+          <span style="width:10px;height:10px;border-radius:50%;background:${s.color};flex:none;margin-top:5px;"></span>
+          <span><b style="display:block;color:var(--text-main);">${s.name}</b>${s.desc}</span></div>`).join("")}
+      </div>
+    </div>
+    <div class="card" style="margin:0;padding:14px 16px;">
+      <div style="font-weight:800;font-size:13.5px;margin-bottom:8px;">숙련도 1–5 = 위임 수준 · 건강도 1–5 = 그렇다의 정도</div>
+      <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;">
+        ${TD_SCALE.map(s => `<div style="background:${s.bg};color:${s.fg};border-radius:6px;padding:6px 4px;text-align:center;font-size:12px;line-height:1.35;"><b style="display:block;font-size:15px;">${s.v}</b>${s.label}</div>`).join("")}
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-top:4px;"><span>팀장 관여 많음</span><span>위임 많음</span></div>
+    </div>
+  </div>`;
+}
+
+async function tdRefresh(section) {
+  const view = tdViewState[section.key];
+  const data = await tdLoad(section, view.round);
+  tdRenderGrid(section, data);
+}
+
+function tdScoreSelect(attrs, v, disabled) {
+  return `<select ${attrs} ${disabled ? "disabled" : ""} style="width:100%;min-height:38px;border:none;background:transparent;font:inherit;font-weight:700;text-align:center;text-align-last:center;color:inherit;cursor:${disabled ? "default" : "pointer"};">
+    ${[0, 1, 2, 3, 4, 5].map(n => `<option value="${n}" ${n === (v || 0) ? "selected" : ""}>${n ? n : "–"}</option>`).join("")}
+  </select>`;
+}
+
+function tdRenderGrid(section, data) {
+  const canEdit = canWriteSection(section);
+  const branches = tdBranches();
+  const leaders = tdLeaders();
+  const bd = data.branches || {};
+  const ld = data.leaders || {};
+  const cell = "border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:0;text-align:center;vertical-align:middle;";
+  const rowHead = "position:sticky;left:0;z-index:1;background:#fff;text-align:left;padding:8px 12px;min-width:170px;font-weight:700;color:var(--text-main);font-size:13px;text-transform:none;letter-spacing:0;border-bottom:1px solid var(--border);border-right:2px solid var(--border);";
+  const sectionRow = (label) => `<tr><th colspan="${leaders.length + 2}" style="background:#F2F6EE;text-align:left;padding:7px 12px;font-size:12px;font-weight:800;color:var(--text-muted);text-transform:none;letter-spacing:.02em;border-bottom:1px solid var(--border);">${label}</th></tr>`;
+
+  // 분포
+  const counts = {};
+  branches.forEach(b => { const s = (bd[b.id] || {}).stage || "none"; counts[s] = (counts[s] || 0) + 1; });
+  document.getElementById("tdDist").innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+    <b style="font-size:13px;margin-right:4px;">이번 회차 단계 분포</b>
+    ${TD_STAGES.map(s => `<span class="pill" style="background:#fff;border:1px solid var(--border);color:var(--text-main);font-size:12px;padding:4px 10px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${s.color};margin-right:6px;"></span>${s.name} ${counts[s.id] || 0}곳</span>`).join("")}
+    ${counts.none ? `<span class="pill" style="background:#fff;border:1px solid var(--border);color:var(--text-muted);font-size:12px;padding:4px 10px;">미진단 ${counts.none}곳</span>` : ""}
+  </div>`;
+
+  let html = `<table style="border-collapse:separate;border-spacing:0;min-width:1340px;font-size:13px;">
+    <thead>
+      <tr><th style="${rowHead}color:var(--text-muted);font-size:12px;">구분</th>
+        ${TD_TEAMS.map(t => `<th colspan="${t.branches.reduce((n, b) => n + b.leaders.length, 0)}" style="${cell}background:${t.bg};color:#2A2230;font-weight:800;padding:8px 4px;text-transform:none;">${t.name}</th>`).join("")}
+        <th rowspan="3" style="${cell}min-width:64px;font-size:12px;text-transform:none;">평균</th></tr>
+      <tr><th style="${rowHead}">지점</th>
+        ${branches.map(b => `<th colspan="${b.leaders.length}" style="${cell}color:var(--text-main);font-size:14px;padding:8px 4px 2px;border-bottom:none;text-transform:none;">${escapeHtml(b.name)}</th>`).join("")}</tr>
+      <tr><th style="${rowHead}">원장</th>
+        ${leaders.map(l => `<th style="${cell}font-weight:500;font-size:12.5px;padding:0 4px 8px;text-transform:none;">${escapeHtml(l.name)}</th>`).join("")}</tr>
+    </thead><tbody>`;
+
+  // 팀 단계
+  html += sectionRow("팀 진단 (지점 단위)");
+  TD_STAGES.forEach(st => {
+    html += `<tr><th style="${rowHead}"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${st.color};margin-right:8px;"></span>${st.name}</th>`;
+    branches.forEach(b => {
+      const on = (bd[b.id] || {}).stage === st.id;
+      html += `<td colspan="${b.leaders.length}" style="${cell}">
+        <button type="button" data-td-stage="${b.id}" data-stage="${st.id}" ${canEdit ? "" : "disabled"} aria-pressed="${on}"
+          style="all:unset;box-sizing:border-box;display:flex;width:100%;min-height:38px;align-items:center;justify-content:center;cursor:${canEdit ? "pointer" : "default"};font-size:12.5px;${on ? `background:${st.color};color:#fff;font-weight:800;` : "color:var(--text-muted);"}">
+          ${on ? "✓ " + st.name : `<span style="width:13px;height:13px;border-radius:50%;border:1.5px solid #B9C0CC;"></span>`}</button></td>`;
+    });
+    html += `<td style="${cell}"></td></tr>`;
+  });
+
+  // 지점 건강도
+  html += sectionRow("지점 건강도 (1–5, 지점 단위)");
+  TD_HEALTH.forEach(h => {
+    const vals = [];
+    html += `<tr><th style="${rowHead}">${h.name}<small style="display:block;font-weight:400;color:var(--text-muted);font-size:11.5px;">${h.desc}</small></th>`;
+    branches.forEach(b => {
+      const v = ((bd[b.id] || {}).health || {})[h.id] || 0; if (v) vals.push(v);
+      html += `<td colspan="${b.leaders.length}" style="${cell}${tdCellStyle(v)}">${tdScoreSelect(`data-td-health="${b.id}" data-item="${h.id}" aria-label="${escapeHtml(b.name)} ${h.name}"`, v, !canEdit)}</td>`;
+    });
+    html += `<td style="${cell}font-weight:700;color:var(--text-muted);">${tdAvg(vals)}</td></tr>`;
+  });
+  html += `<tr><th style="${rowHead}">건강도 평균</th>${branches.map(b => {
+    const hs = (bd[b.id] || {}).health || {};
+    return `<td colspan="${b.leaders.length}" style="${cell}font-weight:800;padding:8px 4px;">${tdAvg(TD_HEALTH.map(h => hs[h.id]))}</td>`;
+  }).join("")}<td style="${cell}"></td></tr>`;
+
+  // 원장 7대 업무
+  html += sectionRow("원장 7대 업무 숙련도 (1–5)");
+  TD_TASKS.forEach(t => {
+    const vals = [];
+    html += `<tr><th style="${rowHead}">${t.name}</th>`;
+    leaders.forEach(l => {
+      const v = ((ld[l.id] || {}).scores || {})[t.id] || 0; if (v) vals.push(v);
+      html += `<td style="${cell}${tdCellStyle(v)}">${tdScoreSelect(`data-td-score="${l.id}" data-item="${t.id}" aria-label="${escapeHtml(l.name)} ${t.name}"`, v, !canEdit)}</td>`;
+    });
+    html += `<td style="${cell}font-weight:700;color:var(--text-muted);">${tdAvg(vals)}</td></tr>`;
+  });
+  html += `<tr><th style="${rowHead}">원장 평균</th>${leaders.map(l => {
+    const sc = (ld[l.id] || {}).scores || {};
+    return `<td style="${cell}font-weight:800;padding:8px 4px;">${tdAvg(TD_TASKS.map(t => sc[t.id]))}</td>`;
+  }).join("")}<td style="${cell}"></td></tr>`;
+
+  // 코칭 메모
+  html += `<tr><th style="${rowHead}">코칭 메모<small style="display:block;font-weight:400;color:var(--text-muted);font-size:11.5px;">지점 단위</small></th>
+    ${branches.map(b => `<td colspan="${b.leaders.length}" style="${cell}"><textarea data-td-note="${b.id}" ${canEdit ? "" : "readonly"} placeholder="관찰, 다음 개입…"
+      style="width:100%;min-height:64px;border:none;resize:vertical;background:transparent;font:inherit;font-size:12.5px;padding:8px;">${escapeHtml((bd[b.id] || {}).note || "")}</textarea></td>`).join("")}
+    <td style="${cell}"></td></tr>`;
+
+  html += `</tbody></table>`;
+  const wrap = document.getElementById("tdGridWrap");
+  wrap.innerHTML = html;
+  if (!canEdit) return;
+
+  wrap.querySelectorAll("[data-td-stage]").forEach(btn => {
+    btn.onclick = () => {
+      const bid = btn.dataset.tdStage;
+      const on = (bd[bid] || {}).stage === btn.dataset.stage;
+      tdSave(section, { branches: { [bid]: { stage: on ? null : btn.dataset.stage } } });
+    };
+  });
+  wrap.querySelectorAll("[data-td-health]").forEach(sel => {
+    sel.onchange = () => tdSave(section, { branches: { [sel.dataset.tdHealth]: { health: { [sel.dataset.item]: Number(sel.value) || null } } } });
+  });
+  wrap.querySelectorAll("[data-td-score]").forEach(sel => {
+    sel.onchange = () => tdSave(section, { leaders: { [sel.dataset.tdScore]: { scores: { [sel.dataset.item]: Number(sel.value) || null } } } });
+  });
+  wrap.querySelectorAll("[data-td-note]").forEach(ta => {
+    ta.onchange = () => tdSave(section, { branches: { [ta.dataset.tdNote]: { note: ta.value } } }, true);
+  });
+}
+
+async function tdSave(section, patch, quiet) {
+  const view = tdViewState[section.key];
+  try {
+    await setDoc(doc(db, "folderEntries", tdDocId(section, view.round)), {
+      folderId: section.folderId, kind: "teamDiag", round: view.round,
+      ...patch,
+      updatedAt: new Date().toISOString(), updatedBy: state.profile.name || ""
+    }, { merge: true });
+    showToast("저장되었습니다.");
+    if (!quiet) tdRefresh(section);
+  } catch (err) {
+    alert("저장 중 오류가 발생했습니다: " + err.message);
+  }
+}
 
 function escapeHtml(str) {
   return str.replace(/[&<>"']/g, m => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[m]));
