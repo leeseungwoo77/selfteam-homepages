@@ -904,6 +904,9 @@ function folderToSection(folder) {
   if (folder.template === "metricAnalysis") {
     return { ...base, isMetricAnalysis: true, desc: folder.desc || "연결한 구글 시트의 지표를 두 시점 기준으로 비교합니다." };
   }
+  if (folder.template === "routineChecklist") {
+    return { ...base, isRoutineChecklist: true, desc: folder.desc || "팀장 업무 매뉴얼의 반복 업무를 일간·주간·월간·분기·반기·연간으로 나눠 체크하고, 주기별 완료율을 관리합니다." };
+  }
   if (folder.template === "taskTracking") {
     return { ...base, isTaskTracking: true, desc: folder.desc || "팀장이 각 지점 원장님에게 동일하게 내린 업무 지시를 지점별로 체크하고, 완료율·마감기한을 관리합니다." };
   }
@@ -1101,6 +1104,7 @@ async function renderSection(key) {
   if (section.isMetricAnalysis) { renderMetricAnalysis(section); return; }
   if (section.isRosterGrid) { renderRosterGrid(section); return; }
   if (section.isTaskTracking) { renderTaskTracking(section); return; }
+  if (section.isRoutineChecklist) { renderRoutineChecklist(section); return; }
   if (section.isMeetingGrid) { renderMeetingGrid(section); return; }
   if (section.isMemberLog) { renderMemberMeetingLog(section); return; }
   if (section.cardView) { renderFolderGrid(section); return; }
@@ -2843,6 +2847,460 @@ function openTaskModal(section, existing) {
         await addDoc(collection(db, "folderEntries"), {
           folderId: section.folderId, title, deadline, note,
           branchDone: {}, createdAt: new Date().toISOString(), createdBy: state.profile.name
+        });
+      }
+      root.innerHTML = "";
+      showToast("저장되었습니다.");
+      renderSection(section.key);
+    } catch (err) {
+      saveBtn.disabled = false;
+      alert("저장 중 오류가 발생했습니다: " + err.message);
+    }
+  });
+}
+
+/* ===================== 팀장 업무 체크리스트 (주기별 칸반 · 완료율) =====================
+   팀장 업무 매뉴얼의 반복 업무를 일간·주간·월간·분기·반기·연간 6개 열로 나눠 체크합니다.
+   - 업무 1건 = folderEntries 문서 1개 (kind:"routine")
+   - 완료 여부는 문서의 done[기간키]에 저장 → 기간이 바뀌면 자동으로 빈 체크리스트가 되고, 지난 기록은 그대로 남습니다.
+     · 일간: "2026-10-14"  · 주간: "W2026-10-12"(그 주 월요일)  · 월간/분기/반기/연간: "2026-10"
+   - 지점별 업무(perBranch)는 done[기간키] = { 지점ID: true } 형태로 지점마다 체크합니다.
+   - 월간 업무는 week(1~4, 0=주차 무관), 분기·반기·연간 업무는 months([1~12])로 해당 시기를 정합니다.
+=========================================================== */
+const ROUTINE_CADENCES = [
+  { key: "daily",     label: "일간", color: "var(--magenta-bright)" },
+  { key: "weekly",    label: "주간", color: "var(--blue-bright)" },
+  { key: "monthly",   label: "월간", color: "var(--green-bright)" },
+  { key: "quarterly", label: "분기", color: "#E8A33C" },
+  { key: "half",      label: "반기", color: "#8E7CC3" },
+  { key: "yearly",    label: "연간", color: "#9CA88F" }
+];
+const ROUTINE_WEEKDAYS = ["", "월", "화", "수", "목", "금"];
+
+// 팀장 업무 매뉴얼(2024.4~2026.10 일정 분석) 기준 기본 업무. "기본 업무 불러오기" 버튼으로 한 번에 등록합니다.
+const ROUTINE_DEFAULT_TASKS = [
+  // 일간
+  { cadence: "daily", title: "고객지표 확인" },
+  { cadence: "daily", title: "일일일정표 확인" },
+  { cadence: "daily", title: "지출결의서 확인" },
+  { cadence: "daily", title: "주말근무표 · 연차 확인" },
+  // 주간
+  { cadence: "weekly", weekday: 1, title: "포커싱 공유" },
+  { cadence: "weekly", weekday: 1, title: "지점 주간회의록 점검" },
+  { cadence: "weekly", title: "진학입시센터 회의 (1시간)", note: "1·2·4주차: 김정서·홍다혜 원장 / 3주차: 이사님·한지윤 팀장 참석 전체 회의" },
+  { cadence: "weekly", weekday: 5, title: "다음 주 미팅 안건 · 자료 준비" },
+  // 월간 - 1주차
+  { cadence: "monthly", week: 1, title: "지점별 업무 확인 · 포커싱 점검", perBranch: true },
+  { cadence: "monthly", week: 1, title: "팀장스터디" },
+  { cadence: "monthly", week: 1, title: "전체 회의 + 팀회의", note: "고객지표 최신화 확인, 유입지표(DB) 기입" },
+  { cadence: "monthly", week: 1, title: "전체 회의 정리 · 공유" },
+  // 월간 - 2주차
+  { cadence: "monthly", week: 2, title: "월간 지표 분석 (3시간)", note: "오프라인 미팅 직전 월요일 오전. 지점별 초기이탈율·임팩트·등록/종료 비교, 지점별 질문 1개씩 도출" },
+  { cadence: "monthly", week: 2, title: "지점 오프라인 미팅 (2시간, 팀원 미팅 → 원장 미팅)", perBranch: true, note: "지난달 포커싱 성찰, 지난달 지표분석, 이번 달 포커싱 진행 상황, 다음 달 포커싱 수립" },
+  { cadence: "monthly", week: 2, title: "지감 회의" },
+  { cadence: "monthly", week: 2, title: "원장별 다음 달 포커싱 기록" },
+  // 월간 - 3주차
+  { cadence: "monthly", week: 3, title: "종료 · 유입 · 손익 리뷰 (2시간)", note: "3·4주차 온라인 미팅 직전. 종료·유입 분석, 에듀큐브 신호등, 지난달 손익계산서, 고객만족도 결과" },
+  { cadence: "monthly", week: 3, title: "지점 온라인 미팅 (1시간)", perBranch: true, note: "종료분석, 유입분석(초기학생 브리핑, 지점 DB), 에듀큐브 상담일지, 에듀큐브 신호등 체크" },
+  { cadence: "monthly", week: 3, title: "본사회의 준비" },
+  { cadence: "monthly", week: 3, title: "본사(팀장) 회의" },
+  { cadence: "monthly", week: 3, title: "팀코칭" },
+  // 월간 - 4주차
+  { cadence: "monthly", week: 4, title: "지점 온라인 미팅 (1시간)", perBranch: true, note: "이번 달 포커싱 진행 상황, 다음 달 포커싱 진행 상황 및 수정, 지난달 손익계산서 분석, 본사 고객만족도조사 리뷰" },
+  { cadence: "monthly", week: 4, title: "리더스터디" },
+  { cadence: "monthly", week: 4, title: "이사님 개별미팅" },
+  { cadence: "monthly", week: 4, title: "다음 달 일정 조율 · 연차 정리" },
+  { cadence: "monthly", week: 4, title: "연간 캘린더 다음 달 항목 확인" },
+  // 월간 - 주차 무관
+  { cadence: "monthly", week: 0, title: "손익계산서 확인" },
+  { cadence: "monthly", week: 0, title: "월간 자주학 점검" },
+  { cadence: "monthly", week: 0, title: "BTS 점검" },
+  { cadence: "monthly", week: 0, title: "월간 이팀장 영상" },
+  { cadence: "monthly", week: 0, title: "지점 회식 · 식사 순회" },
+  // 분기
+  { cadence: "quarterly", months: [3, 6, 9, 12], title: "분기 전략 데이 (반나절)", note: "분기 마지막 주. 분기 결산, 다음 분기 OKR·지점별 포커싱 방향" },
+  { cadence: "quarterly", months: [3, 6, 9, 12], title: "팀장-팀원 분기 개별미팅" },
+  { cadence: "quarterly", months: [3, 6, 9, 12], title: "분기 비전 공유" },
+  { cadence: "quarterly", months: [3, 6, 9, 12], title: "교육청 행정 서류 점검" },
+  { cadence: "quarterly", months: [1, 4, 7, 10], title: "분기 스타 발표" },
+  // 반기
+  { cadence: "half", months: [6, 12], title: "인사평가 작성 · 검수" },
+  { cadence: "half", months: [7, 1], title: "셀프리더 · 임팩트 측정" },
+  { cadence: "half", months: [8, 2], title: "셀프리더 인터뷰" },
+  { cadence: "half", months: [9, 3], title: "셀프리더 · 임팩트 발표" },
+  { cadence: "half", months: [8, 2], title: "승진 신청 · 발표 (승진자 면접)" },
+  { cadence: "half", months: [9, 3], title: "승진자 발령 · 승진자 디너" },
+  { cadence: "half", months: [8, 2], title: "학부모 만족도 조사" },
+  // 연간
+  { cadence: "yearly", months: [2], title: "연간총회" },
+  { cadence: "yearly", months: [3], title: "연봉 · 근로계약" },
+  { cadence: "yearly", months: [3], title: "새학기 설비 점검 · 조치" },
+  { cadence: "yearly", months: [5], title: "상상상생데이" },
+  { cadence: "yearly", months: [5], title: "전반기 직무 만족도 조사" },
+  { cadence: "yearly", months: [5, 6, 10, 11], title: "리더 다면평가 (지점별 순차)" },
+  { cadence: "yearly", months: [7], title: "하반기 결원 예상 · 채용 공고", note: "8월 승진·다면평가·채용 몰림을 분산" },
+  { cadence: "yearly", months: [7], title: "미소진 연차 지정" },
+  { cadence: "yearly", months: [8], title: "전국원장워크샵 · 리더 MT" },
+  { cadence: "yearly", months: [9], title: "다음 해 일정표 · 슈퍼바이징 일정 수립" },
+  { cadence: "yearly", months: [10], title: "미소진 연차 공지" },
+  { cadence: "yearly", months: [11], title: "가치토크 · 에듀코치 시상식" },
+  { cadence: "yearly", months: [11], title: "원장 교육 기획" },
+  { cadence: "yearly", months: [12], title: "성찰데이" },
+  { cadence: "yearly", months: [1], title: "올림피아드" },
+  { cadence: "yearly", months: [2], title: "검정고시 · 반수/재수 PG 제작" },
+  { cadence: "yearly", months: [3], title: "검정고시 · 반수/재수 PG 홍보" },
+  { cadence: "yearly", months: [4], title: "썸머스쿨 PG 제작" },
+  { cadence: "yearly", months: [5], title: "썸머스쿨 PG 홍보 · 9모 대비 PG 제작" },
+  { cadence: "yearly", months: [6], title: "9모 대비 PG 홍보 · 썸머스쿨 세미나" },
+  { cadence: "yearly", months: [7], title: "예비고1 · 2학기 중1 PG 제작" },
+  { cadence: "yearly", months: [8], title: "예비고1 · 중1 PG 홍보 · 내신 PG 재홍보" },
+  { cadence: "yearly", months: [9], title: "윈터스쿨 PG 제작" },
+  { cadence: "yearly", months: [10], title: "윈터스쿨 PG 홍보 · 예비고1 세미나" },
+  { cadence: "yearly", months: [11], title: "윈터스쿨 PG 홍보" },
+  { cadence: "yearly", months: [12], title: "윈터스쿨 세미나" },
+  { cadence: "yearly", months: [1], title: "새학기 내신 대비 PG 제작" },
+  { cadence: "yearly", months: [2], title: "새학기 내신 대비 PG 홍보" }
+];
+
+function routineToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+function routineYmd(d) { return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate()); }
+function routineMonday(d) {
+  const m = new Date(d); const wd = m.getDay(); // 0=일
+  m.setDate(m.getDate() - (wd === 0 ? 6 : wd - 1));
+  return m;
+}
+// 그 달의 몇 주차인지 (1~7일=1주차 … 22일 이후=4주차)
+function routineWeekOfMonth(d) { return Math.min(4, Math.floor((d.getDate() - 1) / 7) + 1); }
+function routinePeriodKey(cadence, d) {
+  if (cadence === "daily") return routineYmd(d);
+  if (cadence === "weekly") return "W" + routineYmd(routineMonday(d));
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+}
+function routinePeriodLabel(cadence, d) {
+  const wd = ["일", "월", "화", "수", "목", "금", "토"][d.getDay()];
+  if (cadence === "daily") return `${d.getMonth() + 1}월 ${d.getDate()}일 (${wd})`;
+  if (cadence === "weekly") {
+    const mon = routineMonday(d); const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    return `${mon.getMonth() + 1}/${mon.getDate()} ~ ${sun.getMonth() + 1}/${sun.getDate()}`;
+  }
+  if (cadence === "monthly") return `${d.getMonth() + 1}월 · 지금 ${routineWeekOfMonth(d)}주차`;
+  if (cadence === "quarterly") return `${Math.floor(d.getMonth() / 3) + 1}분기 · ${d.getMonth() + 1}월 해당`;
+  return `${d.getMonth() + 1}월 해당`;
+}
+// 이번 기간에 보여줄 업무인지 (분기·반기·연간은 해당 월에만)
+function routineIsActive(task, d) {
+  if (["quarterly", "half", "yearly"].includes(task.cadence)) {
+    return Array.isArray(task.months) && task.months.includes(d.getMonth() + 1);
+  }
+  return true;
+}
+// 업무 1건의 완료 비율(0~1). 지점별 업무는 체크한 지점 수 / 전체 지점 수
+function routineTaskProgress(task, periodKey, branches) {
+  const v = (task.done || {})[periodKey];
+  if (!task.perBranch) return v === true ? 1 : 0;
+  if (!branches.length || !v || typeof v !== "object") return 0;
+  return branches.reduce((n, b) => n + (v[b.id] ? 1 : 0), 0) / branches.length;
+}
+function routineRate(tasks, periodKey, branches) {
+  if (!tasks.length) return { done: 0, total: 0, rate: 0 };
+  const sum = tasks.reduce((s, t) => s + routineTaskProgress(t, periodKey, branches), 0);
+  return { done: Math.round(sum * 10) / 10, total: tasks.length, rate: Math.round((sum / tasks.length) * 100) };
+}
+function routineHasRecord(tasks, periodKey) {
+  return tasks.some(t => t.done && Object.prototype.hasOwnProperty.call(t.done, periodKey));
+}
+function routineRateColor(rate) { return rate === 100 ? "var(--green-bright)" : rate < 50 ? "#E8938C" : "var(--blue-bright)"; }
+function routineSortTasks(tasks) {
+  return [...tasks].sort((a, b) => {
+    const wa = a.cadence === "weekly" ? (a.weekday || 9) : (a.week || 9);
+    const wb = b.cadence === "weekly" ? (b.weekday || 9) : (b.week || 9);
+    if (wa !== wb) return wa - wb;
+    const ma = (a.months || [])[0] || 0, mb = (b.months || [])[0] || 0;
+    if (ma !== mb) return ma - mb;
+    return (a.order ?? 0) - (b.order ?? 0) || (a.createdAt || "").localeCompare(b.createdAt || "");
+  });
+}
+
+const routineViewState = {}; // section.key -> { showAll: bool, date: Date }
+
+async function renderRoutineChecklist(section) {
+  const main = document.getElementById("mainContent");
+  const canEdit = canWriteSection(section);
+  main.innerHTML = `<div class="page-header">
+      <div>
+        <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
+        <p>${section.desc}</p>
+      </div>
+      ${canEdit ? `<button class="btn small" id="addRoutineBtn">+ 업무 추가</button>` : ""}
+    </div>
+    <div id="routineStatsWrap" style="margin-bottom:16px;"></div>
+    <div id="routineBoardWrap">불러오는 중...</div>`;
+  if (canEdit) document.getElementById("addRoutineBtn").onclick = () => openRoutineModal(section, null, "daily");
+
+  const docs = (await fetchDocs(section)).filter(d => d.kind === "routine");
+  renderRoutineBody(section, docs);
+}
+
+function renderRoutineBody(section, docs) {
+  const wrap = document.getElementById("routineBoardWrap");
+  if (!wrap) return;
+  const canEdit = canWriteSection(section);
+  const view = routineViewState[section.key] || (routineViewState[section.key] = { showAll: false, openWeeks: {} });
+  const today = routineToday();
+  const branches = taskTrackingBranches();
+
+  if (!docs.length) {
+    wrap.innerHTML = `<div class="card"><div class="empty-state">아직 등록된 업무가 없습니다.${canEdit ? `<br><br>
+      <button class="btn small" id="seedRoutineBtn">팀장 업무 매뉴얼 기본 업무 불러오기 (${ROUTINE_DEFAULT_TASKS.length}건)</button>` : ""}</div></div>`;
+    document.getElementById("routineStatsWrap").innerHTML = "";
+    const seedBtn = document.getElementById("seedRoutineBtn");
+    if (seedBtn) seedBtn.onclick = () => seedRoutineTasks(section, seedBtn);
+    return;
+  }
+
+  // 열(주기)별 데이터 계산
+  const cols = ROUTINE_CADENCES.map(c => {
+    const all = routineSortTasks(docs.filter(t => t.cadence === c.key));
+    const active = all.filter(t => routineIsActive(t, today));
+    const periodKey = routinePeriodKey(c.key, today);
+    return { ...c, all, active, periodKey, stat: routineRate(active, periodKey, branches) };
+  });
+
+  // 상단 요약: 이번 기간 완료율 + 지난 4주 주간 · 지난 3개월 월간 기록
+  const weekHistory = [1, 2, 3, 4].map(n => {
+    const d = new Date(today); d.setDate(d.getDate() - 7 * n);
+    const col = cols.find(c => c.key === "weekly");
+    const pk = routinePeriodKey("weekly", d);
+    return { label: `${n}주 전`, recorded: routineHasRecord(col.all, pk), ...routineRate(col.all, pk, branches) };
+  });
+  const monthHistory = [1, 2, 3].map(n => {
+    const d = new Date(today.getFullYear(), today.getMonth() - n, 1);
+    const col = cols.find(c => c.key === "monthly");
+    const pk = routinePeriodKey("monthly", d);
+    return { label: `${d.getMonth() + 1}월`, recorded: routineHasRecord(col.all, pk), ...routineRate(col.all, pk, branches) };
+  });
+  const overall = (() => {
+    const totals = cols.reduce((acc, c) => ({ sum: acc.sum + c.stat.done, n: acc.n + c.stat.total }), { sum: 0, n: 0 });
+    return totals.n ? Math.round((totals.sum / totals.n) * 100) : 0;
+  })();
+  const histChip = h => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-size:11.5px;color:var(--text-muted);">${h.label}
+      <b class="mono" style="color:${h.recorded ? routineRateColor(h.rate) : "var(--text-muted)"};">${h.recorded ? h.rate + "%" : "-"}</b></span>`;
+  document.getElementById("routineStatsWrap").innerHTML = `<div class="stat-grid">
+      <div class="stat-card"><div class="label">지금 해야 할 업무 전체</div><div class="value" style="color:${routineRateColor(overall)};">${overall}%</div></div>
+      ${cols.slice(0, 3).map(c => `<div class="stat-card"><div class="label">${c.label} 완료율</div>
+        <div class="value" style="color:${c.stat.total ? routineRateColor(c.stat.rate) : "inherit"};">${c.stat.total ? c.stat.rate + "%" : "-"}</div></div>`).join("")}
+    </div>
+    <div class="card" style="margin-top:0;padding:14px 18px;display:flex;flex-wrap:wrap;gap:6px 22px;align-items:center;">
+      <span style="font-size:12.5px;font-weight:700;">지난 기록</span>
+      <span>주간 ${weekHistory.map(histChip).join("")}</span>
+      <span>월간 ${monthHistory.map(histChip).join("")}</span>
+      <label style="margin-left:auto;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="routineShowAll" ${view.showAll ? "checked" : ""}> 분기·반기·연간 전체 업무 보기</label>
+    </div>`;
+  document.getElementById("routineShowAll").onchange = (e) => { view.showAll = e.target.checked; renderRoutineBody(section, docs); };
+
+  const curWeek = routineWeekOfMonth(today);
+  const itemHtml = (t, c) => {
+    const progress = routineTaskProgress(t, c.periodKey, branches);
+    const isDone = progress === 1;
+    const inactive = !routineIsActive(t, today);
+    let tag = "";
+    if (t.cadence === "weekly" && t.weekday) tag = `${ROUTINE_WEEKDAYS[t.weekday]}요일`;
+    if (["quarterly", "half", "yearly"].includes(t.cadence) && t.months?.length) tag = t.months.map(m => m + "월").join("·");
+    const branchRow = t.perBranch ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;">
+        ${branches.map(b => {
+          const on = !!(((t.done || {})[c.periodKey]) || {})[b.id];
+          return `<label style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:11.5px;font-weight:700;cursor:${canEdit && !inactive ? "pointer" : "default"};
+            background:${on ? "#EAF3E3" : "#F4F6F1"};color:${on ? "var(--green-deep)" : "var(--text-muted)"};border:1px solid ${on ? "var(--green-bright)" : "var(--border)"};">
+            <input type="checkbox" data-routine-branch="${t.id}" data-branch="${b.id}" ${on ? "checked" : ""} ${canEdit && !inactive ? "" : "disabled"} style="width:13px;height:13px;margin:0;">${escapeHtml(b.name)}</label>`;
+        }).join("")}</div>` : "";
+    return `<div class="routine-item" style="padding:10px 10px 10px 8px;border-radius:10px;background:${isDone ? "#F3F8EE" : "#fff"};border:1px solid var(--border);margin-bottom:8px;${inactive ? "opacity:.5;" : ""}">
+      <div style="display:flex;gap:8px;align-items:flex-start;">
+        ${t.perBranch
+          ? `<span class="mono" style="min-width:34px;font-size:11px;font-weight:700;color:${routineRateColor(Math.round(progress * 100))};padding-top:2px;">${Math.round(progress * 100)}%</span>`
+          : `<input type="checkbox" data-routine-toggle="${t.id}" ${isDone ? "checked" : ""} ${canEdit && !inactive ? "" : "disabled"} style="width:18px;height:18px;margin-top:1px;flex-shrink:0;cursor:${canEdit ? "pointer" : "default"};">`}
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;font-size:13.5px;line-height:1.4;${isDone ? "text-decoration:line-through;color:var(--text-muted);" : ""}">${escapeHtml(t.title || "")}</div>
+          ${tag ? `<span class="pill" style="background:#EEF3FA;color:var(--blue-deep);margin-top:4px;">${tag}</span>` : ""}
+          ${t.note ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:4px;white-space:pre-wrap;line-height:1.45;">${escapeHtml(t.note)}</div>` : ""}
+          ${branchRow}
+        </div>
+        ${canEdit ? `<div style="display:flex;flex-direction:column;gap:2px;">
+          <button class="icon-btn" data-edit-routine="${t.id}" title="수정" style="padding:2px 6px;">✎</button>
+          <button class="icon-btn danger" data-del-routine="${t.id}" title="삭제" style="padding:2px 6px;">×</button></div>` : ""}
+      </div>
+    </div>`;
+  };
+
+  const colBody = c => {
+    const list = (["quarterly", "half", "yearly"].includes(c.key) && view.showAll) ? c.all : c.active;
+    if (!list.length) return `<div style="font-size:12px;color:var(--text-muted);padding:14px 4px;text-align:center;">이번 기간에 해당하는 업무가 없습니다.</div>`;
+    if (c.key !== "monthly") return list.map(t => itemHtml(t, c)).join("");
+    // 월간은 주차별로 묶고, 이번 주차를 강조합니다.
+    return [1, 2, 3, 4, 0].map(w => {
+      const group = list.filter(t => (t.week || 0) === w);
+      if (!group.length) return "";
+      const g = routineRate(group, c.periodKey, branches);
+      const isNow = w === curWeek;
+      const open = view.openWeeks[w] ?? (isNow || w === 0);
+      return `<div style="margin-bottom:10px;">
+        <div data-routine-week="${w}" style="display:flex;justify-content:space-between;align-items:center;margin:2px 2px 6px;cursor:pointer;user-select:none;">
+          <span style="font-size:12px;font-weight:800;color:${isNow ? "var(--green-deep)" : "var(--text-muted)"};">${open ? "▾" : "▸"} ${w ? w + "주차" : "이번 달 중"}${isNow ? " · 이번 주" : ""}</span>
+          <span class="mono" style="font-size:11px;font-weight:700;color:${routineRateColor(g.rate)};">${g.rate}% · ${g.done}/${g.total}</span>
+        </div>
+        ${open ? `<div style="${isNow ? "padding:6px;border-radius:12px;background:#EEF6E7;" : ""}">${group.map(t => itemHtml(t, c)).join("")}</div>` : ""}
+      </div>`;
+    }).join("");
+  };
+
+  wrap.innerHTML = `<div class="routine-board" style="display:grid;grid-template-columns:repeat(6,minmax(250px,1fr));gap:14px;overflow-x:auto;padding-bottom:8px;align-items:start;">
+    ${cols.map(c => `<div class="card" style="margin:0;padding:14px;background:#FAFCF8;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <h2 style="margin:0;font-size:16px;display:flex;align-items:center;gap:7px;"><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.color};"></span>${c.label}</h2>
+        <span class="mono" style="font-size:13px;font-weight:800;color:${c.stat.total ? routineRateColor(c.stat.rate) : "var(--text-muted)"};">${c.stat.total ? c.stat.rate + "%" : "-"}</span>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin:3px 0 8px;">${routinePeriodLabel(c.key, today)} · ${c.stat.done}/${c.stat.total}</div>
+      <div style="background:var(--bg-soft,#EEF1EA);border-radius:6px;height:8px;overflow:hidden;margin-bottom:12px;">
+        <div style="background:${routineRateColor(c.stat.rate)};height:100%;width:${c.stat.rate}%;"></div>
+      </div>
+      ${colBody(c)}
+      ${canEdit ? `<button class="btn secondary small" data-add-routine="${c.key}" style="width:100%;margin-top:4px;opacity:.85;">+ ${c.label} 업무 추가</button>` : ""}
+    </div>`).join("")}
+  </div>`;
+
+  wrap.querySelectorAll("[data-routine-week]").forEach(el => {
+    el.onclick = () => {
+      const w = Number(el.dataset.routineWeek);
+      const cur = view.openWeeks[w] ?? (w === curWeek || w === 0);
+      view.openWeeks[w] = !cur;
+      renderRoutineBody(section, docs);
+    };
+  });
+  const findCol = t => cols.find(c => c.key === t.cadence);
+  wrap.querySelectorAll("[data-routine-toggle]").forEach(chk => {
+    chk.onchange = async () => {
+      const t = docs.find(x => x.id === chk.dataset.routineToggle); if (!t) return;
+      const pk = findCol(t).periodKey; const val = chk.checked;
+      chk.disabled = true;
+      try {
+        await updateDoc(doc(db, "folderEntries", t.id), { [`done.${pk}`]: val });
+        t.done = { ...(t.done || {}), [pk]: val };
+        renderRoutineBody(section, docs);
+      } catch (err) { chk.checked = !val; chk.disabled = false; alert("저장 중 오류가 발생했습니다: " + err.message); }
+    };
+  });
+  wrap.querySelectorAll("[data-routine-branch]").forEach(chk => {
+    chk.onchange = async () => {
+      const t = docs.find(x => x.id === chk.dataset.routineBranch); if (!t) return;
+      const pk = findCol(t).periodKey; const bid = chk.dataset.branch; const val = chk.checked;
+      chk.disabled = true;
+      try {
+        await updateDoc(doc(db, "folderEntries", t.id), { [`done.${pk}.${bid}`]: val });
+        const prev = (t.done || {})[pk];
+        t.done = { ...(t.done || {}), [pk]: { ...(prev && typeof prev === "object" ? prev : {}), [bid]: val } };
+        renderRoutineBody(section, docs);
+      } catch (err) { chk.checked = !val; chk.disabled = false; alert("저장 중 오류가 발생했습니다: " + err.message); }
+    };
+  });
+  wrap.querySelectorAll("[data-add-routine]").forEach(btn => {
+    btn.onclick = () => openRoutineModal(section, null, btn.dataset.addRoutine);
+  });
+  wrap.querySelectorAll("[data-edit-routine]").forEach(btn => {
+    btn.onclick = () => openRoutineModal(section, docs.find(t => t.id === btn.dataset.editRoutine));
+  });
+  wrap.querySelectorAll("[data-del-routine]").forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm("이 업무를 삭제할까요? 지난 체크 기록도 함께 지워집니다.")) return;
+      await deleteDoc(doc(db, "folderEntries", btn.dataset.delRoutine));
+      showToast("삭제되었습니다.");
+      renderSection(section.key);
+    };
+  });
+}
+
+async function seedRoutineTasks(section, btn) {
+  if (!confirm(`팀장 업무 매뉴얼 기준 기본 업무 ${ROUTINE_DEFAULT_TASKS.length}건을 등록할까요? 등록 후 자유롭게 수정·삭제할 수 있어요.`)) return;
+  btn.disabled = true; btn.textContent = "등록 중...";
+  try {
+    const now = new Date().toISOString();
+    await Promise.all(ROUTINE_DEFAULT_TASKS.map((t, i) => addDoc(collection(db, "folderEntries"), {
+      folderId: section.folderId, kind: "routine",
+      cadence: t.cadence, title: t.title, note: t.note || "",
+      weekday: t.weekday || 0, week: t.week || 0, months: t.months || [],
+      perBranch: !!t.perBranch, done: {}, order: i,
+      createdAt: now, createdBy: state.profile.name
+    })));
+    showToast("기본 업무를 불러왔습니다.");
+    renderSection(section.key);
+  } catch (err) {
+    btn.disabled = false; btn.textContent = "다시 시도";
+    alert("등록 중 오류가 발생했습니다: " + err.message);
+  }
+}
+
+function openRoutineModal(section, existing, defaultCadence) {
+  const root = document.getElementById("modalRoot");
+  const cad = existing?.cadence || defaultCadence || "daily";
+  const months = existing?.months || [];
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>${existing ? "업무 수정" : "업무 추가"} · ${section.label}</h3>
+      <form id="routineForm">
+        <div class="field"><label>업무명</label><input type="text" id="rtTitle" value="${escapeHtml(existing?.title || "")}" required></div>
+        <div class="field"><label>주기</label>
+          <select id="rtCadence">${ROUTINE_CADENCES.map(c => `<option value="${c.key}" ${c.key === cad ? "selected" : ""}>${c.label}</option>`).join("")}</select></div>
+        <div class="field" id="rtWeekdayField"><label>요일 (주간 업무, 선택)</label>
+          <select id="rtWeekday">${ROUTINE_WEEKDAYS.map((w, i) => `<option value="${i}" ${(existing?.weekday || 0) === i ? "selected" : ""}>${w ? w + "요일" : "요일 무관"}</option>`).join("")}</select></div>
+        <div class="field" id="rtWeekField"><label>주차 (월간 업무)</label>
+          <select id="rtWeek">${[0, 1, 2, 3, 4].map(w => `<option value="${w}" ${(existing?.week || 0) === w ? "selected" : ""}>${w ? w + "주차" : "주차 무관"}</option>`).join("")}</select></div>
+        <div class="field" id="rtMonthsField"><label>해당 월 (분기 · 반기 · 연간 업무)</label>
+          <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;">
+            ${[1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<label style="font-size:12.5px;display:flex;align-items:center;gap:4px;font-weight:600;color:var(--text-main);">
+              <input type="checkbox" class="rt-month" value="${m}" ${months.includes(m) ? "checked" : ""}>${m}월</label>`).join("")}
+          </div></div>
+        <div class="field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="rtPerBranch" ${existing?.perBranch ? "checked" : ""} style="width:auto;"> 지점별로 체크 (돈암·행당·별내·다산 각각)</label></div>
+        <div class="field"><label>메모 · 안건 (선택)</label><textarea id="rtNote" rows="3">${escapeHtml(existing?.note || "")}</textarea></div>
+        <div class="grid-2" style="margin-top:10px;">
+          <button type="button" class="btn secondary" id="cancelBtn">취소</button>
+          <button type="submit" class="btn" id="saveRoutineBtn">저장</button>
+        </div>
+      </form>
+    </div></div>`;
+  const syncFields = () => {
+    const c = document.getElementById("rtCadence").value;
+    document.getElementById("rtWeekdayField").style.display = c === "weekly" ? "" : "none";
+    document.getElementById("rtWeekField").style.display = c === "monthly" ? "" : "none";
+    document.getElementById("rtMonthsField").style.display = ["quarterly", "half", "yearly"].includes(c) ? "" : "none";
+  };
+  syncFields();
+  document.getElementById("rtCadence").onchange = syncFields;
+  document.getElementById("cancelBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  document.getElementById("routineForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = document.getElementById("rtTitle").value.trim();
+    if (!title) return;
+    const cadence = document.getElementById("rtCadence").value;
+    const payload = {
+      title, cadence,
+      weekday: cadence === "weekly" ? Number(document.getElementById("rtWeekday").value) : 0,
+      week: cadence === "monthly" ? Number(document.getElementById("rtWeek").value) : 0,
+      months: ["quarterly", "half", "yearly"].includes(cadence)
+        ? [...document.querySelectorAll(".rt-month:checked")].map(x => Number(x.value)) : [],
+      perBranch: document.getElementById("rtPerBranch").checked,
+      note: document.getElementById("rtNote").value.trim()
+    };
+    if (["quarterly", "half", "yearly"].includes(cadence) && !payload.months.length) { alert("해당 월을 하나 이상 선택해주세요."); return; }
+    const saveBtn = document.getElementById("saveRoutineBtn");
+    saveBtn.disabled = true;
+    try {
+      if (existing) {
+        await updateDoc(doc(db, "folderEntries", existing.id), payload);
+      } else {
+        await addDoc(collection(db, "folderEntries"), {
+          folderId: section.folderId, kind: "routine", ...payload,
+          done: {}, order: Date.now(), createdAt: new Date().toISOString(), createdBy: state.profile.name
         });
       }
       root.innerHTML = "";
@@ -4879,10 +5337,11 @@ function openMenuEditModal(item) {
         ${permissionHtml}
         ${item.isCustom ? `<div class="field"><label>양식 종류</label>
           <select id="menuEditTemplate">
-            <option value="standard" ${item.template !== "okr" && item.template !== "metricAnalysis" && item.template !== "taskTracking" ? "selected" : ""}>일반 (제목 + 내용 + 이미지)</option>
+            <option value="standard" ${item.template !== "okr" && item.template !== "metricAnalysis" && item.template !== "taskTracking" && item.template !== "routineChecklist" ? "selected" : ""}>일반 (제목 + 내용 + 이미지)</option>
             <option value="okr" ${item.template === "okr" ? "selected" : ""}>OKR (시즌 · Objective · KR · KT)</option>
             <option value="metricAnalysis" ${item.template === "metricAnalysis" ? "selected" : ""}>지표 분석 (연결된 구글 시트에서 두 시점 비교)</option>
             <option value="taskTracking" ${item.template === "taskTracking" ? "selected" : ""}>업무 트레킹 (지점별 지시 체크리스트 · 완료율 · 마감기한)</option>
+            <option value="routineChecklist" ${item.template === "routineChecklist" ? "selected" : ""}>팀장 업무 체크리스트 (일간~연간 주기별 칸반 · 완료율)</option>
           </select>
           <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">이미 등록된 게시물이 있는 상태에서 종류를 바꾸면 예전 글이 새 양식으로 안 보일 수 있어요.</p>
         </div>` : ""}
@@ -4971,6 +5430,7 @@ async function renderAdmin() {
             <option value="okr">OKR (시즌 · Objective · KR · KT)</option>
             <option value="metricAnalysis">지표 분석 (연결된 구글 시트에서 두 시점 비교)</option>
             <option value="taskTracking">업무 트레킹 (지점별 지시 체크리스트 · 완료율 · 마감기한)</option>
+            <option value="routineChecklist">팀장 업무 체크리스트 (일간~연간 주기별 칸반 · 완료율)</option>
           </select>
         </div>
         <button class="btn" type="submit" style="grid-column: span 2;">폴더 만들기</button>
