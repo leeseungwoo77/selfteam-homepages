@@ -5782,7 +5782,7 @@ async function renderTeamDiagnosis(section) {
     </div>
     <div id="tdGuide"></div>
     <div id="tdDist" style="margin-bottom:14px;"></div>
-    <div class="card" style="padding:0;overflow-x:auto;"><div id="tdGridWrap" style="padding:16px;">불러오는 중...</div></div>
+    <div class="card" style="padding:0;overflow:auto;max-height:calc(100vh - 360px);"><div id="tdGridWrap" style="padding:16px;">불러오는 중...</div></div>
     <p style="font-size:12px;color:var(--text-muted);">칸을 고르면 바로 저장됩니다. 회차(월)를 바꾸면 그 달의 진단을 따로 기록합니다.</p>`;
   document.getElementById("tdGuide").innerHTML = tdGuideHtml();
   document.getElementById("tdRound").onchange = (e) => {
@@ -5840,8 +5840,14 @@ function tdRenderGrid(section, data) {
   const leaders = tdLeaders();
   const bd = data.branches || {};
   const ld = data.leaders || {};
-  const cell = "border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:0;text-align:center;vertical-align:middle;";
+  const cell = "border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:0;text-align:center;vertical-align:middle;background:#fff;";
   const rowHead = "position:sticky;left:0;z-index:1;background:#fff;text-align:left;padding:8px 12px;min-width:170px;font-weight:700;color:var(--text-main);font-size:13px;text-transform:none;letter-spacing:0;border-bottom:1px solid var(--border);border-right:2px solid var(--border);";
+  // 구분·지점·원장 머리글 3개 행을 세로로 스크롤해도 위에 고정해서 보이게 합니다.
+  // (표 높이가 길어지는 진단 항목이 많아서, 밑으로 내려가도 어느 지점·원장 칸인지 계속 보이도록)
+  const TD_HEAD_ROW_H = [42, 34, 34];
+  const TD_HEAD_ROW_TOP = [0, TD_HEAD_ROW_H[0], TD_HEAD_ROW_H[0] + TD_HEAD_ROW_H[1]];
+  const tdStickyHead = (i) => `position:sticky;top:${TD_HEAD_ROW_TOP[i]}px;height:${TD_HEAD_ROW_H[i]}px;box-sizing:border-box;z-index:7;`;
+  const tdStickyCorner = (i) => `position:sticky;left:0;top:${TD_HEAD_ROW_TOP[i]}px;height:${TD_HEAD_ROW_H[i]}px;box-sizing:border-box;z-index:9;background:#fff;`;
   const sectionRow = (label) => `<tr><th colspan="${leaders.length + 2}" style="background:#F2F6EE;text-align:left;padding:7px 12px;font-size:12px;font-weight:800;color:var(--text-muted);text-transform:none;letter-spacing:.02em;border-bottom:1px solid var(--border);">${label}</th></tr>`;
 
   // 분포
@@ -5855,13 +5861,13 @@ function tdRenderGrid(section, data) {
 
   let html = `<table style="border-collapse:separate;border-spacing:0;min-width:900px;font-size:13px;">
     <thead>
-      <tr><th style="${rowHead}color:var(--text-muted);font-size:12px;">구분</th>
-        ${TD_TEAMS.map(t => `<th colspan="${t.branches.reduce((n, b) => n + b.leaders.length, 0)}" style="${cell}background:${t.bg};color:#2A2230;font-weight:800;padding:8px 4px;text-transform:none;">${t.name}</th>`).join("")}
-        <th rowspan="3" style="${cell}min-width:64px;font-size:12px;text-transform:none;">평균</th></tr>
-      <tr><th style="${rowHead}">지점</th>
-        ${branches.map(b => `<th colspan="${b.leaders.length}" style="${cell}color:var(--text-main);font-size:14px;padding:8px 4px 2px;border-bottom:none;text-transform:none;">${escapeHtml(b.name)}</th>`).join("")}</tr>
-      <tr><th style="${rowHead}">원장</th>
-        ${leaders.map(l => `<th style="${cell}font-weight:500;font-size:12.5px;padding:0 4px 8px;text-transform:none;">${escapeHtml(l.name)}</th>`).join("")}</tr>
+      <tr><th style="${rowHead}${tdStickyCorner(0)}color:var(--text-muted);font-size:12px;">구분</th>
+        ${TD_TEAMS.map(t => `<th colspan="${t.branches.reduce((n, b) => n + b.leaders.length, 0)}" style="${cell}${tdStickyHead(0)}background:${t.bg};color:#2A2230;font-weight:800;padding:8px 4px;text-transform:none;">${t.name}</th>`).join("")}
+        <th rowspan="3" style="${cell}position:sticky;top:0;z-index:7;min-width:64px;font-size:12px;text-transform:none;">평균</th></tr>
+      <tr><th style="${rowHead}${tdStickyCorner(1)}">지점</th>
+        ${branches.map(b => `<th colspan="${b.leaders.length}" style="${cell}${tdStickyHead(1)}color:var(--text-main);font-size:14px;padding:8px 4px 2px;border-bottom:none;text-transform:none;">${escapeHtml(b.name)}</th>`).join("")}</tr>
+      <tr><th style="${rowHead}${tdStickyCorner(2)}">원장</th>
+        ${leaders.map(l => `<th style="${cell}${tdStickyHead(2)}font-weight:500;font-size:12.5px;padding:0 4px 8px;text-transform:none;">${escapeHtml(l.name)}</th>`).join("")}</tr>
     </thead><tbody>`;
 
   // 팀 단계
