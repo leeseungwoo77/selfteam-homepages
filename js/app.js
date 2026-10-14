@@ -5574,13 +5574,6 @@ window.cycleMeetingImgZoom = function (img) {
    - folderEntries 규칙을 그대로 쓰므로 Firestore 규칙 변경은 필요 없습니다.
 =========================================================== */
 const TD_TEAMS = [
-  { id: "soul", name: "소울팀", bg: "#F7CFCB", branches: [
-    { id: "junggye", name: "중계", leaders: [{ id: "junggye-han", name: "한성호" }, { id: "junggye-woo", name: "우규하" }] },
-    { id: "sanggye", name: "상계", leaders: [{ id: "sanggye-kim", name: "김광수" }] },
-    { id: "hagye", name: "하계", leaders: [{ id: "hagye-kim", name: "김지영" }] },
-    { id: "gireum", name: "길음", leaders: [{ id: "gireum-kim", name: "김병수" }] },
-    { id: "jeonnong", name: "전농", leaders: [{ id: "jeonnong-shin", name: "신지혜" }] }
-  ]},
   { id: "self", name: "셀프팀", bg: "#CCDCF7", branches: [
     { id: "donam", name: "돈암", leaders: [{ id: "donam-lee", name: "이유민" }] },
     { id: "haengdang", name: "행당", leaders: [{ id: "haengdang-yoon", name: "윤서연" }] },
@@ -5712,7 +5705,7 @@ function tdRenderGrid(section, data) {
     ${counts.none ? `<span class="pill" style="background:#fff;border:1px solid var(--border);color:var(--text-muted);font-size:12px;padding:4px 10px;">미진단 ${counts.none}곳</span>` : ""}
   </div>`;
 
-  let html = `<table style="border-collapse:separate;border-spacing:0;min-width:1340px;font-size:13px;">
+  let html = `<table style="border-collapse:separate;border-spacing:0;min-width:900px;font-size:13px;">
     <thead>
       <tr><th style="${rowHead}color:var(--text-muted);font-size:12px;">구분</th>
         ${TD_TEAMS.map(t => `<th colspan="${t.branches.reduce((n, b) => n + b.leaders.length, 0)}" style="${cell}background:${t.bg};color:#2A2230;font-weight:800;padding:8px 4px;text-transform:none;">${t.name}</th>`).join("")}
