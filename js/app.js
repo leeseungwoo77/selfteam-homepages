@@ -6020,43 +6020,29 @@ async function renderTeamDiagnosis(section) {
   const main = document.getElementById("mainContent");
   const view = tdViewState[section.key] || (tdViewState[section.key] = { round: tdThisMonth(), tab: "diag" });
   if (!view.tab) view.tab = "diag";
+  const guide = view.tab !== "diag" ? BTS_GUIDES.find(g => g.key === view.tab) : null;
   const tabBtn = (key, label) => `<button type="button" class="btn small ${view.tab === key ? "" : "secondary"}" data-td-tab="${key}">${label}</button>`;
   const tabBar = `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
       ${tabBtn("diag", "원장 팀 진단")}
-      ${BTS_GUIDES.map(g => tabBtn(g.key, g.label)).join("")}
+      ${BTS_GUIDES.map(g => tabBtn(g.key, g.label + " 체크판")).join("")}
     </div>`;
-
-  if (view.tab !== "diag") {
-    const guide = BTS_GUIDES.find(g => g.key === view.tab);
-    main.innerHTML = `<div class="page-header">
-        <div>
-          <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
-          <p>${section.desc}</p>
-        </div>
-      </div>
-      ${tabBar}
-      ${guide ? renderBtsGuideHtml(guide) : ""}`;
-    main.querySelectorAll("[data-td-tab]").forEach(btn => {
-      btn.onclick = () => { view.tab = btn.getAttribute("data-td-tab"); renderTeamDiagnosis(section); };
-    });
-    return;
-  }
 
   main.innerHTML = `<div class="page-header">
       <div>
         <h1><span class="badge" style="background:${COLOR_HEX[section.color]}"></span>${section.label}</h1>
         <p>${section.desc}</p>
       </div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);font-weight:700;">진단 회차
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);font-weight:700;">${guide ? "체크 회차" : "진단 회차"}
         <input type="month" id="tdRound" value="${view.round}" style="font:inherit;padding:6px 10px;border:1px solid var(--border);border-radius:8px;">
       </label>
     </div>
     ${tabBar}
-    <div id="tdGuide"></div>
+    ${guide ? `<div class="card" style="margin-bottom:14px;"><details><summary style="cursor:pointer;font-weight:800;font-size:14px;">${escapeHtml(guide.title)} 역할과 책임 · 7대 업무 설명 보기</summary><div style="margin-top:12px;">${renderBtsGuideHtml(guide)}</div></details></div>`
+      : `<div id="tdGuide"></div>`}
     <div id="tdDist" style="margin-bottom:14px;"></div>
     <div class="card" style="padding:0;overflow:auto;max-height:calc(100vh - 360px);"><div id="tdGridWrap" style="padding:16px;">불러오는 중...</div></div>
-    <p style="font-size:12px;color:var(--text-muted);">칸을 고르면 바로 저장됩니다. 회차(월)를 바꾸면 그 달의 진단을 따로 기록합니다.</p>`;
-  document.getElementById("tdGuide").innerHTML = tdGuideHtml();
+    <p style="font-size:12px;color:var(--text-muted);">칸을 고르면 바로 저장됩니다. 회차(월)를 바꾸면 그 달의 ${guide ? "체크 현황" : "진단"}을 따로 기록합니다.</p>`;
+  if (!guide) document.getElementById("tdGuide").innerHTML = tdGuideHtml();
   document.getElementById("tdRound").onchange = (e) => {
     if (!/^\d{4}-\d{2}$/.test(e.target.value)) return;
     view.round = e.target.value;
@@ -6100,7 +6086,64 @@ function tdGuideHtml() {
 async function tdRefresh(section) {
   const view = tdViewState[section.key];
   const data = await tdLoad(section, view.round);
-  tdRenderGrid(section, data);
+  const guide = view.tab && view.tab !== "diag" ? BTS_GUIDES.find(g => g.key === view.tab) : null;
+  if (guide) renderBtsChecklist(section, guide, data);
+  else tdRenderGrid(section, data);
+}
+
+function renderBtsChecklist(section, guide, data) {
+  const canEdit = canWriteSection(section);
+  const branches = tdBranches();
+  const bd = data.branches || {};
+  const gkey = guide.key;
+  const cell = "border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:0;text-align:center;vertical-align:middle;background:#fff;";
+  const rowHead = "position:sticky;left:0;z-index:1;background:#fff;text-align:left;padding:8px 12px;min-width:240px;font-weight:600;color:var(--text-main);font-size:12.5px;text-transform:none;letter-spacing:0;border-bottom:1px solid var(--border);border-right:2px solid var(--border);";
+  const sectionRow = (label) => `<tr><th colspan="${branches.length + 1}" style="background:#F2F6EE;text-align:left;padding:7px 12px;font-size:12px;font-weight:800;color:var(--text-muted);text-transform:none;letter-spacing:.02em;border-bottom:1px solid var(--border);">${label}</th></tr>`;
+  const btsOf = (bid) => ((bd[bid] || {}).bts || {})[gkey] || {};
+
+  // 체크율 요약
+  const totalItems = guide.tasks.length * 3;
+  document.getElementById("tdDist").innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+    <b style="font-size:13px;margin-right:4px;">이번 회차 ${escapeHtml(guide.label)} 체크율</b>
+    ${branches.map(b => {
+      const n = Object.values(btsOf(b.id)).filter(Boolean).length;
+      return `<span class="pill" style="background:#fff;border:1px solid var(--border);color:var(--text-main);font-size:12px;padding:4px 10px;">${escapeHtml(b.name)} ${n}/${totalItems}</span>`;
+    }).join("")}
+  </div>`;
+
+  let html = `<table style="border-collapse:separate;border-spacing:0;min-width:760px;font-size:13px;">
+    <thead><tr>
+      <th style="${rowHead}position:sticky;top:0;z-index:9;color:var(--text-muted);font-size:12px;">체크 항목 (3대 원칙)</th>
+      ${branches.map(b => `<th style="${cell}position:sticky;top:0;z-index:7;min-width:76px;color:var(--text-main);font-size:13px;padding:8px 4px;text-transform:none;">${escapeHtml(b.name)}</th>`).join("")}
+    </tr></thead><tbody>`;
+
+  guide.tasks.forEach(t => {
+    html += sectionRow(`${t.num}. ${escapeHtml(t.title)} <span style="font-weight:400;">— ${escapeHtml(t.subtitle)}</span>`);
+    t.principles.forEach((p, idx) => {
+      const itemId = `${t.num}_${idx + 1}`;
+      html += `<tr><th style="${rowHead}"><span style="color:var(--text-muted);font-weight:700;margin-right:4px;">${idx + 1}.</span>${escapeHtml(p)}</th>`;
+      branches.forEach(b => {
+        const on = !!btsOf(b.id)[itemId];
+        html += `<td style="${cell}">
+          <button type="button" data-bts-check="${b.id}" data-item="${itemId}" ${canEdit ? "" : "disabled"} aria-pressed="${on}" aria-label="${escapeHtml(b.name)} ${escapeHtml(p)}"
+            style="all:unset;box-sizing:border-box;display:flex;width:100%;min-height:38px;align-items:center;justify-content:center;cursor:${canEdit ? "pointer" : "default"};font-size:15px;font-weight:800;${on ? "background:var(--green-bright);color:#fff;" : "color:#B9C0CC;"}">${on ? "✓" : "·"}</button></td>`;
+      });
+      html += `</tr>`;
+    });
+  });
+  html += `</tbody></table>`;
+
+  const wrap = document.getElementById("tdGridWrap");
+  wrap.innerHTML = html;
+  if (!canEdit) return;
+  wrap.querySelectorAll("[data-bts-check]").forEach(btn => {
+    btn.onclick = () => {
+      const bid = btn.dataset.btsCheck;
+      const item = btn.dataset.item;
+      const on = !!btsOf(bid)[item];
+      tdSave(section, { branches: { [bid]: { bts: { [gkey]: { [item]: on ? null : true } } } } });
+    };
+  });
 }
 
 function tdScoreSelect(attrs, v, disabled) {
