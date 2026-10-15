@@ -5965,6 +5965,24 @@ const BTS_GUIDES = [
     ]
   }
 ];
+// BTS 체크판 점수 1–5: 각 지점이 해당 원칙을 얼마나 체화해 실행하고 있는지
+const BTS_LEVEL = [
+  { v: 1, label: "인지 못함", desc: "이 원칙을 의식하지 못하거나 전혀 실행하지 않는다", bg: "#FBE3E0", fg: "#7A2E22" },
+  { v: 2, label: "가끔 시도", desc: "알고는 있으나 생각날 때만 가끔 시도한다", bg: "#FBEFD0", fg: "#6B4A12" },
+  { v: 3, label: "절반 정도 실행", desc: "상황에 따라 절반 정도는 실행한다", bg: "#F5F3C8", fg: "#5C5518" },
+  { v: 4, label: "대부분 실행", desc: "대부분의 상황에서 꾸준히 실행한다", bg: "#DCEEDC", fg: "#2E5C2E" },
+  { v: 5, label: "완전히 체화", desc: "습관처럼 항상 실행하고 팀원에게도 전파한다", bg: "#BFE3BF", fg: "#1F4A1F" }
+];
+function btsLevelStyle(v) { const s = BTS_LEVEL.find(x => x.v === v); return s ? `background:${s.bg};color:${s.fg};` : ""; }
+function btsLevelLegendHtml() {
+  return `<div class="card" style="margin:0 0 14px;padding:14px 16px;">
+    <div style="font-weight:800;font-size:13.5px;margin-bottom:8px;">실행 수준 1–5: 이 원칙이 얼마나 체화되어 실행되고 있는지</div>
+    <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;">
+      ${BTS_LEVEL.map(s => `<div style="background:${s.bg};color:${s.fg};border-radius:6px;padding:6px 4px;text-align:center;font-size:12px;line-height:1.35;"><b style="display:block;font-size:15px;">${s.v}</b>${s.label}<small style="display:block;font-weight:400;margin-top:2px;">${s.desc}</small></div>`).join("")}
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-top:4px;"><span>전혀 안 됨</span><span>완전히 체화</span></div>
+  </div>`;
+}
 function renderBtsGuideHtml(guide) {
   return `<div class="card" style="margin-bottom:14px;">
     <div style="font-size:18px;font-weight:800;margin-bottom:2px;">BTS <span style="font-size:13px;font-weight:700;color:var(--text-muted);">Basic To Self leader</span> · ${escapeHtml(guide.title)}</div>
@@ -6037,7 +6055,7 @@ async function renderTeamDiagnosis(section) {
       </label>
     </div>
     ${tabBar}
-    ${guide ? `<div class="card" style="margin-bottom:14px;"><details><summary style="cursor:pointer;font-weight:800;font-size:14px;">${escapeHtml(guide.title)} 역할과 책임 · 7대 업무 설명 보기</summary><div style="margin-top:12px;">${renderBtsGuideHtml(guide)}</div></details></div>`
+    ${guide ? `${btsLevelLegendHtml()}<div class="card" style="margin-bottom:14px;"><details><summary style="cursor:pointer;font-weight:800;font-size:14px;">${escapeHtml(guide.title)} 역할과 책임 · 7대 업무 설명 보기</summary><div style="margin-top:12px;">${renderBtsGuideHtml(guide)}</div></details></div>`
       : `<div id="tdGuide"></div>`}
     <div id="tdDist" style="margin-bottom:14px;"></div>
     <div class="card" style="padding:0;overflow:auto;max-height:calc(100vh - 360px);"><div id="tdGridWrap" style="padding:16px;">불러오는 중...</div></div>
@@ -6098,51 +6116,48 @@ function renderBtsChecklist(section, guide, data) {
   const gkey = guide.key;
   const cell = "border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:0;text-align:center;vertical-align:middle;background:#fff;";
   const rowHead = "position:sticky;left:0;z-index:1;background:#fff;text-align:left;padding:8px 12px;min-width:240px;font-weight:600;color:var(--text-main);font-size:12.5px;text-transform:none;letter-spacing:0;border-bottom:1px solid var(--border);border-right:2px solid var(--border);";
-  const sectionRow = (label) => `<tr><th colspan="${branches.length + 1}" style="background:#F2F6EE;text-align:left;padding:7px 12px;font-size:12px;font-weight:800;color:var(--text-muted);text-transform:none;letter-spacing:.02em;border-bottom:1px solid var(--border);">${label}</th></tr>`;
+  const sectionRow = (label) => `<tr><th colspan="${branches.length + 2}" style="background:#F2F6EE;text-align:left;padding:7px 12px;font-size:12px;font-weight:800;color:var(--text-muted);text-transform:none;letter-spacing:.02em;border-bottom:1px solid var(--border);">${label}</th></tr>`;
   const btsOf = (bid) => ((bd[bid] || {}).bts || {})[gkey] || {};
 
-  // 체크율 요약
-  const totalItems = guide.tasks.length * 3;
+  // 이번 회차 지점별 평균 점수 요약
   document.getElementById("tdDist").innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-    <b style="font-size:13px;margin-right:4px;">이번 회차 ${escapeHtml(guide.label)} 체크율</b>
+    <b style="font-size:13px;margin-right:4px;">이번 회차 ${escapeHtml(guide.label)} 평균 점수(1~5)</b>
     ${branches.map(b => {
-      const n = Object.values(btsOf(b.id)).filter(Boolean).length;
-      return `<span class="pill" style="background:#fff;border:1px solid var(--border);color:var(--text-main);font-size:12px;padding:4px 10px;">${escapeHtml(b.name)} ${n}/${totalItems}</span>`;
+      const avg = tdAvg(Object.values(btsOf(b.id)));
+      return `<span class="pill" style="background:#fff;border:1px solid var(--border);color:var(--text-main);font-size:12px;padding:4px 10px;">${escapeHtml(b.name)} ${avg}</span>`;
     }).join("")}
   </div>`;
 
-  let html = `<table style="border-collapse:separate;border-spacing:0;min-width:760px;font-size:13px;">
+  let html = `<table style="border-collapse:separate;border-spacing:0;min-width:820px;font-size:13px;">
     <thead><tr>
       <th style="${rowHead}position:sticky;top:0;z-index:9;color:var(--text-muted);font-size:12px;">체크 항목 (3대 원칙)</th>
       ${branches.map(b => `<th style="${cell}position:sticky;top:0;z-index:7;min-width:76px;color:var(--text-main);font-size:13px;padding:8px 4px;text-transform:none;">${escapeHtml(b.name)}</th>`).join("")}
+      <th style="${cell}position:sticky;top:0;z-index:7;min-width:60px;color:var(--text-main);font-size:12px;text-transform:none;">평균</th>
     </tr></thead><tbody>`;
 
   guide.tasks.forEach(t => {
     html += sectionRow(`${t.num}. ${escapeHtml(t.title)} <span style="font-weight:400;">— ${escapeHtml(t.subtitle)}</span>`);
     t.principles.forEach((p, idx) => {
       const itemId = `${t.num}_${idx + 1}`;
+      const vals = [];
       html += `<tr><th style="${rowHead}"><span style="color:var(--text-muted);font-weight:700;margin-right:4px;">${idx + 1}.</span>${escapeHtml(p)}</th>`;
       branches.forEach(b => {
-        const on = !!btsOf(b.id)[itemId];
-        html += `<td style="${cell}">
-          <button type="button" data-bts-check="${b.id}" data-item="${itemId}" ${canEdit ? "" : "disabled"} aria-pressed="${on}" aria-label="${escapeHtml(b.name)} ${escapeHtml(p)}"
-            style="all:unset;box-sizing:border-box;display:flex;width:100%;min-height:38px;align-items:center;justify-content:center;cursor:${canEdit ? "pointer" : "default"};font-size:15px;font-weight:800;${on ? "background:var(--green-bright);color:#fff;" : "color:#B9C0CC;"}">${on ? "✓" : "·"}</button></td>`;
+        const v = btsOf(b.id)[itemId] || 0; if (v) vals.push(v);
+        html += `<td style="${cell}${btsLevelStyle(v)}">${tdScoreSelect(`data-bts-score="${b.id}" data-item="${itemId}" aria-label="${escapeHtml(b.name)} ${escapeHtml(p)}"`, v, !canEdit)}</td>`;
       });
-      html += `</tr>`;
+      html += `<td style="${cell}font-weight:700;color:var(--text-muted);">${tdAvg(vals)}</td></tr>`;
     });
   });
+  html += `<tr><th style="${rowHead}border-top:2px solid var(--border);">전체 평균</th>${branches.map(b => {
+    return `<td style="${cell}border-top:2px solid var(--border);font-weight:800;padding:8px 4px;">${tdAvg(Object.values(btsOf(b.id)))}</td>`;
+  }).join("")}<td style="${cell}border-top:2px solid var(--border);"></td></tr>`;
   html += `</tbody></table>`;
 
   const wrap = document.getElementById("tdGridWrap");
   wrap.innerHTML = html;
   if (!canEdit) return;
-  wrap.querySelectorAll("[data-bts-check]").forEach(btn => {
-    btn.onclick = () => {
-      const bid = btn.dataset.btsCheck;
-      const item = btn.dataset.item;
-      const on = !!btsOf(bid)[item];
-      tdSave(section, { branches: { [bid]: { bts: { [gkey]: { [item]: on ? null : true } } } } });
-    };
+  wrap.querySelectorAll("[data-bts-score]").forEach(sel => {
+    sel.onchange = () => tdSave(section, { branches: { [sel.dataset.btsScore]: { bts: { [gkey]: { [sel.dataset.item]: Number(sel.value) || null } } } } });
   });
 }
 
