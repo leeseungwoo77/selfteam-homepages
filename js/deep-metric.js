@@ -9,8 +9,10 @@
 
 const BRANCH_ORDER = ["돈암", "행당", "별내", "다산"];
 // 낮을수록 좋은 지표
-const LOWER_BETTER = new Set(["전체종료", "초기종료", "이탈율", "초기이탈율", "누적이탈율", "누적초기이탈율", "이탈율(개별)", "churn", "end", "refOut"]);
-const PCT_METRICS = new Set(["이탈율", "초기이탈율", "누적이탈율", "누적초기이탈율", "프리미엄율", "이탈율(개별)", "초기학생비율", "단기학생비율", "중기학생비율", "장기학생비율", "수익율", "churn", "premium"]);
+const LOWER_BETTER = new Set(["전체종료", "초기종료", "이탈율", "초기이탈율", "누적이탈율", "누적초기이탈율", "이탈율(개별)", "churn", "end", "refOut", "counsel"]);
+// 좋고 나쁨을 가르지 않는 지표 (값만 비교, 색 없음)
+const NEUTRAL = new Set(["w4", "w3"]);
+const PCT_METRICS = new Set(["이탈율", "초기이탈율", "누적이탈율", "누적초기이탈율", "프리미엄율", "이탈율(개별)", "초기학생비율", "단기학생비율", "중기학생비율", "장기학생비율", "수익율", "churn", "premium", "w5", "w4", "w3", "counsel"]);
 
 const KPI_CARDS = [
   { m: "월말", label: "월말 학생" },
@@ -32,6 +34,7 @@ const MEMBER_METRICS = {
   상담관리: [
     { k: "churn", label: "이탈률" }, { k: "net", label: "순증(신규−종료)" },
     { k: "finish", label: "월말 인원" }, { k: "new", label: "신규/복회" }, { k: "end", label: "종료" },
+    { k: "w5", label: "주5회 비율" }, { k: "w4", label: "주4회 비율" }, { k: "w3", label: "주3회 비율" }, { k: "counsel", label: "상담 비율" },
   ],
   개별지도: [
     { k: "churn", label: "이탈률" }, { k: "premium", label: "프미율" }, { k: "perComma", label: "인당콤마" },
@@ -41,7 +44,7 @@ const MEMBER_METRICS = {
 const SERIES_COLORS = ["#1B5A96", "#2F6B14", "#8E1E5C", "#E8A33C", "#3B9BE8", "#8E7CC3", "#0F8A7E", "#C0396A"];
 const MIN_BASE = 5;
 // 평균 대비 ▲▼ 판정 허용폭 (이 안이면 '비슷')
-const TOL = { churn: 0.02, premium: 0.02, perComma: 1, net: 0.5, finish: 0.5, new: 0.5, end: 0.5 }; // 월초 5명 미만이면 이탈률 표본이 작다고 표시
+const TOL = { churn: 0.02, premium: 0.02, perComma: 1, net: 0.5, finish: 0.5, new: 0.5, end: 0.5, w5: 0.05, w4: 0.05, w3: 0.05, counsel: 0.05 }; // 월초 5명 미만이면 이탈률 표본이 작다고 표시
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isPct = m => PCT_METRICS.has(m);
@@ -59,7 +62,7 @@ function fmtDiff(d, m) {
 }
 // good / bad / flat
 function judge(d, m, tol = 0) {
-  if (d === null || d === undefined || Number.isNaN(d) || Math.abs(d) <= tol) return "flat";
+  if (d === null || d === undefined || Number.isNaN(d) || Math.abs(d) <= tol || NEUTRAL.has(m)) return "flat";
   const better = LOWER_BETTER.has(m) ? d < 0 : d > 0;
   return better ? "good" : "bad";
 }
@@ -81,7 +84,7 @@ export function buildModel(payload) {
   const col = {
     br: 0, ym: 1, area: 2, name: 3, role: 4, start: ix("월초"), new: ix("신규"), refIn: ix("리퍼+"), refOut: ix("리퍼-"),
     end: ix("종료"), adj: ix("보정"), finish: ix("월말"), churn: ix("이탈률(재계산)"), premium: ix("프미율"),
-    comma: ix("콤마수"), perComma: ix("인당콤마"),
+    comma: ix("콤마수"), perComma: ix("인당콤마"), w5: ix("주5회"), w4: ix("주4회"), w3: ix("주3회"), counsel: ix("상담비율"),
   };
   const M = []; // 구성원 레코드
   (payload.member?.rows || []).forEach(r => {
@@ -91,6 +94,7 @@ export function buildModel(payload) {
       branch: r[0], ym, area: r[2], name: String(r[3]).trim(), role: r[4],
       start: n("start"), new: n("new"), refIn: n("refIn"), refOut: n("refOut"), end: n("end"), finish: n("finish"),
       churn: n("churn"), premium: n("premium"), comma: n("comma"), perComma: n("perComma"),
+      w5: n("w5"), w4: n("w4"), w3: n("w3"), counsel: n("counsel"),
     };
     rec.net = rec.new !== null || rec.end !== null ? (rec.new || 0) - (rec.end || 0) : null; // 순증 = 신규 − 종료 (담당 이동 제외)
     M.push(rec);
@@ -118,6 +122,11 @@ function managerAvg(recs, k) {
   if (k === "churn") { // 인원 가중: 매니저 전체 종료 ÷ 매니저 전체 월초
     const s = mgr.reduce((a, r) => a + (r.start || 0), 0);
     return s ? mgr.reduce((a, r) => a + (r.end || 0), 0) / s : null;
+  }
+  if (["w5", "w4", "w3", "counsel"].includes(k)) { // 수강 형태 비율: 매니저 월말 인원 가중
+    const w = mgr.filter(r => r[k] !== null && r.finish);
+    const t = w.reduce((a, r) => a + r.finish, 0);
+    return t ? w.reduce((a, r) => a + r[k] * r.finish, 0) / t : null;
   }
   const vals = mgr.map(r => r[k]).filter(v => v !== null && v !== undefined);
   return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
@@ -338,6 +347,7 @@ export async function renderDeepMetric(main, ctx) {
       { k: "start", l: "월초" }, { k: "new", l: "신규" }, { k: "ref", l: "리퍼 ±" }, { k: "end", l: "종료" }, { k: "finish", l: "월말" },
       { k: "churn", l: "이탈률", cmp: true }, ...(isIndiv ? [{ k: "premium", l: "프미율", cmp: true }, { k: "perComma", l: "인당콤마", cmp: true }] : []),
       { k: "net", l: "순증(신규−종료)", cmp: true },
+      ...(!isIndiv ? [{ k: "w5", l: "주5회", cmp: true }, { k: "w4", l: "주4회", cmp: true }, { k: "w3", l: "주3회", cmp: true }, { k: "counsel", l: "상담", cmp: true }] : []),
     ];
     const avg = {}; cols.forEach(c => { if (c.k !== "ref") avg[c.k] = managerAvg(cur, c.k); });
     const cell = (r, c) => {
@@ -420,6 +430,14 @@ export async function renderDeepMetric(main, ctx) {
       mgr.forEach(r => {
         if (r.premium !== null && ap !== null && ap - r.premium >= 0.1) out.push(`<b>${esc(r.name)}</b> 프미율 ${fmt(r.premium, "premium")} — 평균(${fmt(ap, "premium")})보다 ${fmtDiff(r.premium - ap, "premium")}. 온리 개별지도 비중이 높은지 확인.`);
         if (r.perComma !== null && ac !== null && r.finish >= MIN_BASE && ac - r.perComma >= 3) out.push(`<b>${esc(r.name)}</b> 인당콤마 ${fmt(r.perComma, "perComma")} — 평균(${fmt(ac, "perComma")})보다 ${fmtDiff(r.perComma - ac, "perComma")}.`);
+      });
+    }
+    // 4-2) 상담관리: 수강 형태(주5회·상담) 평균 대비
+    if (ui.area === "상담관리") {
+      const a5 = managerAvg(cur, "w5"), ac = managerAvg(cur, "counsel");
+      mgr.forEach(r => {
+        if (r.w5 !== null && a5 !== null && r.finish >= MIN_BASE && a5 - r.w5 >= 0.15) out.push(`<b>${esc(r.name)}</b> 주5회 비율 ${fmt(r.w5, "w5")} — 매니저 평균(${fmt(a5, "w5")})보다 ${fmtDiff(r.w5 - a5, "w5")}. 등원 횟수가 적은 학생이 몰려 있는지 확인.`);
+        if (r.counsel !== null && ac !== null && r.finish >= MIN_BASE && r.counsel - ac >= 0.15) out.push(`<b>${esc(r.name)}</b> 상담 비율 ${fmt(r.counsel, "counsel")} — 매니저 평균(${fmt(ac, "counsel")})보다 ${fmtDiff(r.counsel - ac, "counsel")}.`);
       });
     }
     // 5) 원장 직접 담당 비중
