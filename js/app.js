@@ -4,6 +4,7 @@ import {
   getDoc, getDocs, query, where, orderBy, serverTimestamp,
   storage, ref, uploadBytes, getDownloadURL, deleteObject
 } from "./firebase-init.js";
+import { renderDeepMetric } from "./deep-metric.js";
 
 /* ===================== 섹션(메뉴) 정의 =====================
    collectionName : Firestore 컬렉션 이름
@@ -63,6 +64,10 @@ const SECTIONS = [
   { key:"performance", label:"지점 성과 지표", group:"성과·전략", color:"blue",
     desc:"고객지표 · 경영지표 등 평가지표를 그대로 보여줍니다.",
     isEvalSheet:true },
+
+  { key:"deepMetric", label:"지점·구성원 지표분석", group:"성과·전략", color:"blue",
+    desc:"고객지표(지점 전체 흐름·전년 대비)와 등록현황(구성원별 흐름·매니저 평균 대비)을 함께 봅니다. 매일 06시 자동 갱신.",
+    isDeepMetric:true },
 
   { key:"notice", label:"팀 공지사항", group:"소통·협업", color:"magenta",
     collectionName:"notices", scope:"team", writable:"leader",
@@ -1008,7 +1013,7 @@ function buildNav() {
   const allFolders = state.customFolders.map(f => withOverride(folderToSection(f))).filter(s => !s.leaderOnly || canViewAllRole());
   // "본사" 지점 소속 팀원(이사님 제외)은 아래 메뉴만 보이게 합니다.
   const isHqStaff = state.profile.role === "member" && state.profile.branchName === "본사";
-  const HQ_STAFF_ALLOWED_LABELS = ["팀장 일정", "팀 회의", "전체 회의", "본사 회의", "지표 분석", "지점 운영 자료", "리더십 자료", "팀 스터디 자료", "지점 인적 구성"];
+  const HQ_STAFF_ALLOWED_LABELS = ["팀장 일정", "팀 회의", "전체 회의", "본사 회의", "지표 분석", "지점·구성원 지표분석", "지점 운영 자료", "리더십 자료", "팀 스터디 자료", "지점 인적 구성"];
   const allItems = [...allBuiltIn, ...allFolders].filter(s => !isHqStaff || HQ_STAFF_ALLOWED_LABELS.includes(s.label));
   GROUP_ORDER.forEach(group => {
     const items = allItems.filter(s => s.group === group).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -1105,6 +1110,11 @@ async function renderSection(key) {
   if (section.isOpsGrid) { renderOpsGrid(section); return; }
   if (section.isOkr) { renderOkrFolder(section); return; }
   if (section.isMetricAnalysis) { renderMetricAnalysis(section); return; }
+  if (section.isDeepMetric) {
+    renderDeepMetric(main, { state, db, doc, getDoc, setDoc, section, COLOR_HEX,
+      isLeader: state.profile.role === "leader", canViewAll: canViewAllRole() });
+    return;
+  }
   if (section.isRosterGrid) { renderRosterGrid(section); return; }
   if (section.isTaskTracking) { renderTaskTracking(section); return; }
   if (section.isRoutineChecklist) { renderRoutineChecklist(section); return; }
