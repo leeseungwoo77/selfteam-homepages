@@ -60,7 +60,8 @@ function parseKpiTab_(branch, values) {
     const a = String(row[0] || '').trim(), b = clean_(row[1]);
     const goal = a.match(/(20\d\d)년\s*목표/);
     if (goal) lastGoalYear = Number(goal[1]);
-    if (b === '월' && clean_(row[2]) === '1월') {          // 블록 헤더
+    // 블록 헤더: 2026·2024 블록은 B열='월', 2025 블록은 A열='2025'에 B열이 비어 있음 → 둘 다 인식
+    if (clean_(row[2]) === '1월' && (b === '월' || /^20\d\d$/.test(a))) {
       year = /^20\d\d$/.test(a) ? Number(a) : lastGoalYear;
       continue;
     }

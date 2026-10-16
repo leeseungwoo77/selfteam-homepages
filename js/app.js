@@ -942,7 +942,7 @@ function getSectionByKey(key) {
 
 /* ===================== 상단 탭 바 ===================== */
 function tabMeta(key) {
-  if (key === "admin") return { label: "지점 · 팀원 관리", color: "#9CA88F" };
+  if (key === "admin") return { label: "홈페이지 관리", color: "#9CA88F" };
   const s = getSectionByKey(key);
   return s ? { label: s.label, color: COLOR_HEX[s.color] || "#9CA88F" } : null;
 }
@@ -1037,7 +1037,7 @@ function buildNav() {
   if (state.profile.role === "leader") {
     html += `<div class="nav-group"><div class="nav-group-label">관리</div>
       <div class="nav-item" data-key="admin" style="--nav-color:#9CA88F">
-        <span class="nav-label"><span class="dot" style="background:#9CA88F"></span>지점 · 팀원 관리</span>
+        <span class="nav-label"><span class="dot" style="background:#9CA88F"></span>홈페이지 관리</span>
       </div></div>`;
   }
   nav.innerHTML = html;
@@ -2191,7 +2191,7 @@ async function renderOpsGrid(section) {
 
 function renderOpsTable(categories, branchesSorted, linksMap) {
   const wrap = document.getElementById("opsGridWrap");
-  if (!branchesSorted.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다. "지점 · 팀원 관리"에서 지점을 먼저 추가해주세요.</div>`; return; }
+  if (!branchesSorted.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다. "홈페이지 관리"에서 지점을 먼저 추가해주세요.</div>`; return; }
   if (!categories.length) { wrap.innerHTML = `<div class="empty-state">${state.profile.role === "leader" ? "위에서 양식을 먼저 추가해주세요." : "아직 등록된 양식이 없습니다."}</div>`; return; }
   const isLeaderView = state.profile.role === "leader";
 
@@ -2792,7 +2792,7 @@ function renderTaskTrackingBody(section, docs, isArchive) {
     statsWrap.insertAdjacentHTML("beforeend", `<div class="card" style="padding:14px 20px;font-size:13px;color:var(--text-muted);margin-top:12px;">보관함에는 숨겨둔 업무가 ${hiddenDocs.length}건 있어요. 원래 마감일로부터 1년이 다 되어가면 자동으로 다음 해 일정으로 다시 등록돼요.</div>`);
   }
 
-  if (!branches.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다. "지점 · 팀원 관리"에서 지점을 먼저 추가해주세요.</div>`; return; }
+  if (!branches.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다. "홈페이지 관리"에서 지점을 먼저 추가해주세요.</div>`; return; }
 
   const sortState = getTaskSortState(section.key);
   const baseList = isArchive ? hiddenDocs : activeDocs;
@@ -5485,7 +5485,7 @@ function openMenuEditModal(item) {
 
 async function renderAdmin() {
   const main = document.getElementById("mainContent");
-  main.innerHTML = `<div class="page-header"><div><h1>지점 · 팀원 관리</h1><p>지점을 추가하고 팀원 권한을 확인합니다.</p></div></div>
+  main.innerHTML = `<div class="page-header"><div><h1>홈페이지 관리</h1><p>지점·팀원 권한과 메뉴를 관리합니다.</p></div></div>
     <div class="card">
       <h2>지점 추가</h2>
       <form id="branchForm" class="grid-2">
