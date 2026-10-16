@@ -113,11 +113,11 @@ service cloud.firestore {
     // 여러 화면에 붙는 단순 링크 버튼(예: 손익계산서) - 팀장만 수정
     match /siteLinks/{id} { allow read: if isSignedIn(); allow write: if isLeader(); }
 
-    // 지점·구성원 지표분석 연결 키 - 문서 id = 지점명(돈암/행당/별내/다산) 또는 ALL
-    // 팀장·뷰어는 전부, 원장님(팀원)은 자기 지점 문서만 읽기. 쓰기는 팀장만.
-    match /metricKeys/{scope} {
-      allow read: if canViewAll() || (isSignedIn() && scope != 'ALL' && (myProfile().branchName == scope || myProfile().branchName == scope + '점'));
-      allow write: if isLeader();
+    // 지점·구성원 지표분석 데이터 - 문서 id = 지점명(돈암/행당/별내/다산). Apps Script 수집기가 매일 06시 기록.
+    // 팀장·뷰어는 전부, 원장님(팀원)은 자기 지점 문서만 읽기. 홈페이지에서는 아무도 쓰지 못함(수집기만 기록).
+    match /metricData/{scope} {
+      allow read: if canViewAll() || (isSignedIn() && (myProfile().branchName == scope || myProfile().branchName == scope + '점'));
+      allow write: if false;
     }
 
     // 지점 인적 구성 - 팀장만 수정, 로그인한 누구나 조회

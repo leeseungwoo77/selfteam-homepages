@@ -3,8 +3,8 @@
      branch.rows = [지점, 연도, 월, 지표, 값]              ← 고객지표 시트 (2024~2026)
      member.rows = [지점, 월(YYYY-MM), 영역, 구성원, 역할, 월초, 신규, 리퍼+, 리퍼-, 종료, 보정, 월말,
                     이탈률(재계산), 프미율, 콤마수, 인당콤마, 주5회, 주4회, 주3회, 상담비율, 양식]
-   권한: Firestore metricKeys/{지점명|ALL} 문서에 { endpoint, key } 저장
-         → 원장님은 자기 지점 문서만 읽을 수 있음(firestore.rules)
+   저장: 수집기가 Firestore metricData/{지점명} 문서에 { payload(JSON 문자열), updatedAt } 기록
+   권한: 팀장·뷰어는 4개 지점 전부, 원장님은 자기 지점 문서만 읽기 (firestore.rules)
 ================================================================ */
 
 const BRANCH_ORDER = ["돈암", "행당", "별내", "다산"];
@@ -189,17 +189,13 @@ export async function renderDeepMetric(main, ctx) {
   main.innerHTML = `<div class="page-header"><div>
       <h1><span class="badge" style="background:${ctx.COLOR_HEX?.[section.color] || "var(--blue-bright)"}"></span>${esc(section.label)}</h1>
       <p>${esc(section.desc)}</p></div>
-      ${ctx.isLeader ? `<button class="btn small secondary" id="dmSettingBtn" type="button">연결 설정</button>` : ""}
     </div>
-    <div id="dmSetting"></div>
     <div id="dmBody"><div class="card"><div class="empty-state">데이터를 불러오는 중...</div></div></div>`;
-  if (ctx.isLeader) document.getElementById("dmSettingBtn").onclick = () => renderSetting(ctx);
 
   let payload;
   try { payload = await loadPayload(ctx); }
   catch (e) {
     document.getElementById("dmBody").innerHTML = `<div class="card"><div class="empty-state">${esc(e.message)}</div></div>`;
-    if (ctx.isLeader && /연결/.test(e.message)) renderSetting(ctx);
     return;
   }
   const model = buildModel(payload);
@@ -439,42 +435,28 @@ export async function renderDeepMetric(main, ctx) {
   draw();
 }
 
-/* ---------- 데이터 로드 (하루 단위 캐시) ---------- */
+/* ---------- 데이터 로드 (Firestore metricData/{지점}) ---------- */
 async function loadPayload(ctx) {
-  const scope = ctx.canViewAll ? "ALL" : shortBranch(ctx.state.profile.branchName);
-  const snap = await ctx.getDoc(ctx.doc(ctx.db, "metricKeys", scope)).catch(() => null);
-  if (!snap || !snap.exists()) throw new Error(ctx.isLeader ? "아직 데이터 연결이 설정되지 않았습니다. 오른쪽 위 '연결 설정'에서 웹앱 주소와 키를 입력해주세요." : "팀장님이 이 지점의 데이터 연결을 아직 설정하지 않았습니다.");
-  const { endpoint, key } = snap.data();
-  const cacheKey = `dm_${scope}_${new Date().toISOString().slice(0, 10)}`;
-  try { const c = sessionStorage.getItem(cacheKey); if (c) return JSON.parse(c); } catch (e) { /* 캐시 없음 */ }
-  const res = await fetch(`${endpoint}?key=${encodeURIComponent(key)}`);
-  if (!res.ok) throw new Error(`데이터를 불러오지 못했습니다 (${res.status})`);
-  const data = await res.json();
-  if (data.error) throw new Error(data.error === "unauthorized" ? "연결 키가 맞지 않습니다. 팀장님께 문의해주세요." : data.error);
-  try { sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch (e) { /* 용량 초과 시 캐시 생략 */ }
-  return data;
-}
-
-/* ---------- 팀장 전용: 연결 설정 ---------- */
-async function renderSetting(ctx) {
-  const box = document.getElementById("dmSetting");
-  if (box.innerHTML) { box.innerHTML = ""; return; }
-  const scopes = [...BRANCH_ORDER, "ALL"];
-  const cur = {};
-  await Promise.all(scopes.map(async s => { const d = await ctx.getDoc(ctx.doc(ctx.db, "metricKeys", s)).catch(() => null); cur[s] = d && d.exists() ? d.data() : {}; }));
-  const ep = Object.values(cur).find(v => v.endpoint)?.endpoint || "";
-  box.innerHTML = `<div class="card"><h2>데이터 연결 설정 (팀장 전용)</h2>
-    <p class="dm-note" style="margin:0 0 12px;">Apps Script 웹앱 주소와, setupKeys 실행 결과로 나온 지점별 키를 입력하세요. 원장님은 자기 지점 키만 읽을 수 있습니다.</p>
-    <div class="field"><label>웹앱 주소</label><input id="dmEp" value="${esc(ep)}" placeholder="https://script.google.com/macros/s/..../exec" style="width:100%;"></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:10px;">
-      ${scopes.map(s => `<div class="field"><label>${s === "ALL" ? "전체(팀장·뷰어)" : s + "점"} 키</label><input class="dmKey" data-s="${s}" value="${esc(cur[s].key || "")}"></div>`).join("")}
-    </div>
-    <button class="btn small" id="dmSave" type="button" style="margin-top:12px;">저장</button></div>`;
-  document.getElementById("dmSave").onclick = async () => {
-    const endpoint = document.getElementById("dmEp").value.trim();
-    await Promise.all([...document.querySelectorAll(".dmKey")].filter(i => i.value.trim()).map(i =>
-      ctx.setDoc(ctx.doc(ctx.db, "metricKeys", i.dataset.s), { endpoint, key: i.value.trim(), updatedAt: new Date().toISOString() })));
-    Object.keys(sessionStorage).filter(k => k.startsWith("dm_")).forEach(k => sessionStorage.removeItem(k));
-    renderDeepMetric(document.getElementById("mainContent"), ctx);
-  };
+  const scopes = ctx.canViewAll ? BRANCH_ORDER : [shortBranch(ctx.state.profile.branchName)];
+  const snaps = await Promise.all(scopes.map(b => ctx.getDoc(ctx.doc(ctx.db, "metricData", b)).catch(() => null)));
+  const merged = { branch: { header: null, rows: [] }, member: { header: null, rows: [] }, updatedAt: null };
+  snaps.forEach(snap => {
+    if (!snap || !snap.exists()) return;
+    const d = snap.data();
+    const p = JSON.parse(d.payload || "{}");
+    merged.branch.header ||= p.branch?.header; merged.member.header ||= p.member?.header;
+    merged.branch.rows.push(...(p.branch?.rows || [])); merged.member.rows.push(...(p.member?.rows || []));
+    const u = d.updatedAt?.toDate ? d.updatedAt.toDate().toISOString() : d.updatedAt;
+    if (u && (!merged.updatedAt || u < merged.updatedAt)) merged.updatedAt = u;
+  });
+  if (!merged.branch.rows.length && !merged.member.rows.length) {
+    throw new Error(ctx.isLeader
+      ? "아직 수집된 데이터가 없습니다. Apps Script에서 collectAll을 한 번 실행한 뒤 새로고침해주세요."
+      : "아직 이 지점 데이터가 준비되지 않았습니다. 팀장님께 문의해주세요.");
+  }
+  if (merged.updatedAt) { // 한국 시간으로 표시
+    const k = new Date(new Date(merged.updatedAt).getTime() + 9 * 3600 * 1000);
+    merged.updatedAt = k.toISOString().slice(0, 16);
+  }
+  return merged;
 }

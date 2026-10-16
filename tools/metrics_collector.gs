@@ -5,12 +5,11 @@
  *  1) 고객지표 시트(지점_2026 탭, 2026/2025/2024 블록)  → branch_monthly 탭
  *  2) 등록현황 이전 양식(~26.06) + 신규 양식(26.07~)의
  *     '상담관리 분석' / '개별지도 분석' 블록           → member_monthly 탭
- *  3) 매일 06시 자동 갱신 (setupDailyTrigger 1회 실행)
- *  4) 웹앱(doGet)으로 JSON 제공 — 지점별 키로 "자기 지점만" 내려줌
+ *  3) 지점별로 Firebase(Firestore) metricData/{지점} 문서에 직접 저장
+ *     → 홈페이지가 이 문서를 읽고, 권한(원장=자기 지점)은 Firestore 규칙이 막음
+ *  4) 매일 06시 자동 갱신 (setupDailyTrigger 1회 실행)
  *
- * 설치: 새 구글 시트 → 확장 프로그램 > Apps Script → 이 파일 붙여넣기
- *       → collectAll 1회 실행(권한 승인) → setupDailyTrigger 1회 실행
- *       → setupKeys 1회 실행(키 생성) → 배포 > 웹앱(실행: 나, 액세스: 모든 사용자)
+ * 설치: README '지점·구성원 지표분석' 참고 (appsscript.json에 권한 4줄 추가 필요)
  */
 
 // ===== 설정 =====================================================
@@ -24,6 +23,7 @@ const BRANCHES = {
   '다산': { kpiTab: '다산_2026', oldId: '1pP-hKNrRZYeqf7cuPxidg2QsAGARJl_plEltA-fRjNQ', newId: '1H2xcODphqnD97xxo62dH0IOOgZMauZtTWR5_NmrtQ10' },
 };
 const NEW_FORMAT_FROM = '2026-07';   // 이 달부터는 신규 양식만 사용
+const FIREBASE_PROJECT_ID = 'selfteam-homepage-91564';
 
 // ===== 공통 유틸 ================================================
 function num_(v) {
@@ -173,8 +173,32 @@ function collectAll() {
   writeTab_('branch_monthly', ['지점', '연도', '월', '지표', '값'], branchRows);
   writeTab_('member_monthly', ['지점', '월', '영역', '구성원', '역할', '월초', '신규', '리퍼+', '리퍼-', '종료', '보정', '월말',
     '이탈률(재계산)', '프미율', '콤마수', '인당콤마', '주5회', '주4회', '주3회', '상담비율', '양식'], memberRows);
+  const BH = ['지점', '연도', '월', '지표', '값'];
+  const MH = ['지점', '월', '영역', '구성원', '역할', '월초', '신규', '리퍼+', '리퍼-', '종료', '보정', '월말',
+    '이탈률(재계산)', '프미율', '콤마수', '인당콤마', '주5회', '주4회', '주3회', '상담비율', '양식'];
+  Object.keys(BRANCHES).forEach(branch => {
+    try {
+      pushToFirestore_(branch, {
+        branch: { header: BH, rows: branchRows.filter(r => r[0] === branch) },
+        member: { header: MH, rows: memberRows.filter(r => r[0] === branch) },
+      });
+    } catch (e) { log.push(`${branch} Firebase 저장 실패: ${e.message}`); }
+  });
   writeTab_('collect_log', ['시각', '내용'], [[new Date(), log.length ? log.join(' / ') : `정상 (지점 ${branchRows.length}행, 구성원 ${memberRows.length}행)`]], true);
-  CacheService.getScriptCache().remove('payload');
+}
+
+// Firestore REST로 저장 — 이 스크립트를 실행하는 구글 계정이 Firebase 프로젝트 구성원(편집자 이상)이어야 함
+function pushToFirestore_(branch, payload) {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/metricData/${encodeURIComponent(branch)}`;
+  const body = { fields: {
+    payload: { stringValue: JSON.stringify(payload) },
+    updatedAt: { timestampValue: new Date().toISOString() },
+  } };
+  const res = UrlFetchApp.fetch(url, {
+    method: 'patch', contentType: 'application/json', payload: JSON.stringify(body),
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() >= 300) throw new Error(`${res.getResponseCode()} ${res.getContentText().slice(0, 200)}`);
 }
 
 function writeTab_(name, header, rows, append) {
@@ -191,29 +215,3 @@ function setupDailyTrigger() {
   ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'collectAll').forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('collectAll').timeBased().atHour(6).everyDays(1).inTimezone('Asia/Seoul').create();
 }
-
-// 지점별 열람 키 생성 — 원장님께는 자기 지점 키만, 팀장은 ALL 키
-function setupKeys() {
-  const p = PropertiesService.getScriptProperties();
-  const keys = {};
-  [...Object.keys(BRANCHES), 'ALL'].forEach(b => { keys[b] = Utilities.getUuid().slice(0, 12); p.setProperty('KEY_' + b, keys[b]); });
-  Logger.log(JSON.stringify(keys, null, 2));
-}
-
-// ===== 웹앱: ?key=xxxx → 해당 지점(또는 전체) JSON ===============
-function doGet(e) {
-  const key = (e.parameter.key || '').trim();
-  const p = PropertiesService.getScriptProperties().getProperties();
-  const scope = Object.keys(p).filter(k => k.startsWith('KEY_') && p[k] === key).map(k => k.slice(4))[0];
-  if (!scope) return json_({ error: 'unauthorized' });
-  const ss = SpreadsheetApp.getActive();
-  const read = n => { const v = ss.getSheetByName(n).getDataRange().getValues(); return { header: v[0], rows: v.slice(1) }; };
-  const b = read('branch_monthly'), m = read('member_monthly');
-  const keep = r => scope === 'ALL' || r[0] === scope;
-  return json_({
-    scope, updatedAt: ss.getSheetByName('collect_log').getLastRow() > 1 ? ss.getSheetByName('collect_log').getRange(ss.getSheetByName('collect_log').getLastRow(), 1).getValue() : null,
-    branch: { header: b.header, rows: b.rows.filter(keep) },
-    member: { header: m.header, rows: m.rows.filter(keep) },
-  });
-}
-const json_ = o => ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
