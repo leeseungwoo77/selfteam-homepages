@@ -213,7 +213,8 @@ const SCHEDULE_KEYWORD_RULES = [
   { word: "생일", bg: "#8E44AD", color: "#fff" },
   { word: "이동", bg: "#F0E4C8", color: "#000" },
   { word: "휴무", bg: "#FFFFFF", color: "#E03C3C" },
-  { word: "코칭", bg: "#00897B", color: "#fff" }
+  { word: "코칭", bg: "#00897B", color: "#fff" },
+  { word: "스터디", bg: "#9B59B6", color: "#fff" }
 ];
 // "회의"/"미팅"은 지점명보다 우선순위가 낮습니다. (예: "행당 팀원 미팅" → 행당 고유색이 먼저 적용되어야 함)
 const SCHEDULE_MEETING_RULE = { words: ["회의", "미팅"], bg: "#E8938C", color: "#fff" };
