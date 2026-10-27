@@ -3984,16 +3984,32 @@ async function renderMetricAnalysis(section) {
     // "전체"(팀 전체 기준) 기록은 팀장/뷰어만 남길 수 있고, 원장님(팀원)은 자기 지점 기록만 남기고 볼 수 있습니다.
     const noteBranchOptions = canViewAllRole() ? ["전체", ...branchOptionsFor(tabNames)] : branchOptionsFor(tabNames);
     let noteBranchFilterValue = ""; // ""면 전체 보기
-    let lastLoadedNotes = []; // 지점 필터를 다시 걸 때 다시 불러오지 않도록 캐시해둡니다.
+    let noteMonthFilterValue = ""; // ""면 전체 보기
+    let lastLoadedNotes = []; // 지점·월 필터를 다시 걸 때 다시 불러오지 않도록 캐시해둡니다.
+    function applyNoteFilters() {
+      renderMetricNotesList(lastLoadedNotes.filter(n =>
+        (!noteBranchFilterValue || n.branchLabel === noteBranchFilterValue) &&
+        (!noteMonthFilterValue || n.month === noteMonthFilterValue)));
+    }
     const noteFilterWrap = document.getElementById("noteBranchFilterWrap");
     if (noteFilterWrap) {
-      noteFilterWrap.innerHTML = `<div class="field" style="max-width:220px;margin-bottom:0;">
-        <label style="font-size:11px;">지점별로 보기</label>
-        <select id="noteBranchFilterSelect"><option value="">전체 보기</option>${noteBranchOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}</select>
+      noteFilterWrap.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <div class="field" style="max-width:220px;margin-bottom:0;">
+          <label style="font-size:11px;">지점별로 보기</label>
+          <select id="noteBranchFilterSelect"><option value="">전체 보기</option>${noteBranchOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}</select>
+        </div>
+        <div class="field" style="max-width:220px;margin-bottom:0;">
+          <label style="font-size:11px;">월별로 보기</label>
+          <select id="noteMonthFilterSelect"><option value="">전체 보기</option>${months.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}</select>
+        </div>
       </div>`;
       document.getElementById("noteBranchFilterSelect").addEventListener("change", (e) => {
         noteBranchFilterValue = e.target.value;
-        renderMetricNotesList(lastLoadedNotes.filter(n => !noteBranchFilterValue || n.branchLabel === noteBranchFilterValue));
+        applyNoteFilters();
+      });
+      document.getElementById("noteMonthFilterSelect").addEventListener("change", (e) => {
+        noteMonthFilterValue = e.target.value;
+        applyNoteFilters();
       });
     }
     // 순서 변경(▲▼)은 팀장만 할 수 있게 해서, 여러 지점 기록이 섞인 목록에서 순서가 뒤엉키지 않게 합니다.
@@ -4082,7 +4098,7 @@ async function renderMetricAnalysis(section) {
           return (b.createdAt || "").localeCompare(a.createdAt || "");
         });
         lastLoadedNotes = notes;
-        renderMetricNotesList(notes.filter(n => !noteBranchFilterValue || n.branchLabel === noteBranchFilterValue));
+        applyNoteFilters();
       } catch (err) {
         wrap.innerHTML = `<div class="empty-state">불러오는 중 오류: ${escapeHtml(err.message)}</div>`;
       }
