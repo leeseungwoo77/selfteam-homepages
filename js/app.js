@@ -774,6 +774,12 @@ onAuthStateChanged(auth, async (user) => {
   await loadMenuOverrides();
   loadOpenTabs();
   if (!state.openTabs.includes(state.currentSection)) state.openTabs.unshift(state.currentSection);
+  // 로그인하면 "팀장 일정"과 함께 "팀장 업무 체크리스트"도 항상 같이 열리게 합니다. (탭을 닫아도 다음 로그인 때 다시 열립니다)
+  const routineChecklistFolder = state.customFolders.find(f => f.template === "routineChecklist");
+  if (routineChecklistFolder && (routineChecklistFolder.visibility !== "leader" || canViewAllRole())) {
+    const routineTabKey = "folder_" + routineChecklistFolder.id;
+    if (!state.openTabs.includes(routineTabKey)) state.openTabs.push(routineTabKey);
+  }
   buildNav();
   renderTabBar();
   renderSection(state.currentSection);
