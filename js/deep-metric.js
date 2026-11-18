@@ -44,7 +44,13 @@ const MEMBER_METRICS = {
 const SERIES_COLORS = ["#1B5A96", "#2F6B14", "#8E1E5C", "#E8A33C", "#3B9BE8", "#8E7CC3", "#0F8A7E", "#C0396A"];
 const MIN_BASE = 5;
 // 평균 대비 ▲▼ 판정 허용폭 (이 안이면 '비슷')
-const TOL = { churn: 0.02, premium: 0.02, perComma: 1, net: 0.5, finish: 0.5, new: 0.5, end: 0.5, w5: 0.05, w4: 0.05, w3: 0.05, counsel: 0.05 }; // 월초 5명 미만이면 이탈률 표본이 작다고 표시
+const TOL = { churn: 0.02, premium: 0.02, perComma: 1, comma: 5, net: 0.5, finish: 0.5, new: 0.5, end: 0.5, w5: 0.05, w4: 0.05, w3: 0.05, counsel: 0.05 }; // 월초 5명 미만이면 이탈률 표본이 작다고 표시
+// 반기(6개월) 인사평가 요소: 상담관리(코칭매니저)는 학생수·콤마수·이탈율, 개별지도(교실장)는 콤마수·이탈율
+// 값(학생수/콤마수)은 "6개월 평균", 이탈율은 "6개월 가중평균(반기 총종료 ÷ 총월초)"으로 집계합니다.
+const HR_EVAL_METRIC = {
+  상담관리: [{ key: "finish", label: "학생수" }, { key: "comma", label: "콤마수" }],
+  개별지도: [{ key: "comma", label: "콤마수" }],
+};
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isPct = m => PCT_METRICS.has(m);
@@ -71,6 +77,25 @@ const toneBg = { good: "#E6F4D9", bad: "#FBE3EC", flat: "#F4F6F2" };
 const ymLabel = ym => `${ym.slice(2, 4)}.${Number(ym.slice(5))}월`;
 const ymAdd = (ym, n) => { const d = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5)) - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
 const shortBranch = n => String(n || "").replace(/점$/, "").replace(/^에듀플렉스\s*/, "").trim();
+const pad2 = n => String(n).padStart(2, "0");
+// 인사평가 반기: 상반기 = 전년 12월~해당년 5월, 하반기 = 해당년 6월~11월
+function halfYearOf(ym) {
+  const y = Number(ym.slice(0, 4)), mo = Number(ym.slice(5));
+  if (mo >= 6 && mo <= 11) return { key: `${y}-H2` };
+  const endYear = mo === 12 ? y + 1 : y;
+  return { key: `${endYear}-H1` };
+}
+function halfYearMonths(key) {
+  const [yStr, half] = key.split("-");
+  const y = Number(yStr);
+  if (half === "H2") return [6, 7, 8, 9, 10, 11].map(m => `${y}-${pad2(m)}`);
+  return [[y - 1, 12], [y, 1], [y, 2], [y, 3], [y, 4], [y, 5]].map(([yy, mm]) => `${yy}-${pad2(mm)}`);
+}
+function halfYearLabel(key) {
+  const [yStr, half] = key.split("-");
+  const y = Number(yStr);
+  return half === "H2" ? `${y}년 하반기 (6~11월)` : `${y}년 상반기 ('${String(y - 1).slice(2)}.12~'${String(y).slice(2)}.5)`;
+}
 
 /* ---------- 데이터 정리 ---------- */
 export function buildModel(payload) {
@@ -216,7 +241,7 @@ export async function renderDeepMetric(main, ctx) {
     document.getElementById("dmBody").innerHTML = `<div class="card"><div class="empty-state">열람 가능한 지점 데이터가 없습니다.</div></div>`;
     return;
   }
-  const ui = { branch: branches[0], tab: "branch", area: "상담관리", metricB: "월말", metricM: "churn", ym: null };
+  const ui = { branch: branches[0], tab: "branch", area: "상담관리", metricB: "월말", metricM: "churn", ym: null, half: null };
   const memberMonths = br => [...new Set(model.M.filter(r => r.branch === br).map(r => r.ym))].sort();
 
   function defaultYm(br) {
@@ -224,11 +249,20 @@ export async function renderDeepMetric(main, ctx) {
     return lb ? `${lb.y}-${String(lb.mo).padStart(2, "0")}` : memberMonths(br).slice(-1)[0];
   }
   ui.ym = defaultYm(ui.branch);
+  ui.half = halfYearOf(ui.ym).key;
 
   function monthOptions(br) {
     const set = new Set(memberMonths(br));
     Object.entries(model.B[br]?.["월말"] || {}).forEach(([y, ms]) => Object.keys(ms).forEach(mo => set.add(`${y}-${String(mo).padStart(2, "0")}`)));
     return [...set].sort().reverse();
+  }
+  // 그 지점에 데이터가 있는 반기 목록 (최신순) — 데이터가 없어도 현재 선택된 반기는 항상 포함합니다.
+  function halfOptions(br) {
+    const yms = new Set(memberMonths(br));
+    Object.entries(model.B[br]?.["월말"] || {}).forEach(([y, ms]) => Object.keys(ms).forEach(mo => yms.add(`${y}-${String(mo).padStart(2, "0")}`)));
+    const keys = new Set([...yms].map(ym => halfYearOf(ym).key));
+    keys.add(ui.half);
+    return [...keys].sort().reverse();
   }
 
   function draw() {
@@ -243,8 +277,8 @@ export async function renderDeepMetric(main, ctx) {
         <span class="dm-meta">데이터 기준 ${payload.updatedAt ? esc(String(payload.updatedAt).slice(0, 16).replace("T", " ")) : "-"} (매일 06시 자동 갱신)</span>
       </div>
       <div id="dmTab"></div>`;
-    if (document.getElementById("dmBranch")) document.getElementById("dmBranch").onchange = e => { ui.branch = e.target.value; ui.ym = defaultYm(ui.branch); draw(); };
-    document.getElementById("dmYm").onchange = e => { ui.ym = e.target.value; draw(); };
+    if (document.getElementById("dmBranch")) document.getElementById("dmBranch").onchange = e => { ui.branch = e.target.value; ui.ym = defaultYm(ui.branch); ui.half = halfYearOf(ui.ym).key; draw(); };
+    document.getElementById("dmYm").onchange = e => { ui.ym = e.target.value; ui.half = halfYearOf(ui.ym).key; draw(); };
     body.querySelectorAll(".dm-seg button[data-tab]").forEach(b => b.onclick = () => { ui.tab = b.dataset.tab; draw(); });
     const tab = document.getElementById("dmTab");
     if (ui.tab === "branch") drawBranch(tab); else drawMember(tab);
@@ -325,19 +359,24 @@ export async function renderDeepMetric(main, ctx) {
   /* ---------------- 구성원 ---------------- */
   function drawMember(el) {
     const br = ui.branch;
-    const months = memberMonths(br).filter(m => m <= ui.ym).slice(-6);
+    // 반기(6개월) 단위: 상반기(전년 12월~5월) / 하반기(6월~11월) — 팀 인사평가 주기에 맞춥니다.
+    const months = halfYearMonths(ui.half);
+    const availableMonths = new Set(memberMonths(br));
+    const snapMonth = [...months].reverse().find(m => availableMonths.has(m)) || months[months.length - 1];
     const recsOf = ym => model.M.filter(r => r.branch === br && r.ym === ym && r.area === ui.area && r.role !== "교실장집계");
-    const cur = recsOf(ui.ym);
+    const cur = recsOf(snapMonth);
     const metrics = MEMBER_METRICS[ui.area];
     if (!metrics.some(m => m.k === ui.metricM)) ui.metricM = "churn";
     const mLabel = metrics.find(m => m.k === ui.metricM).label;
 
     const seg = `<div class="dm-bar" style="margin-bottom:12px;">
       <div class="dm-seg" id="dmArea">${["상담관리", "개별지도"].map(a => `<button data-a="${a}" class="${ui.area === a ? "on" : ""}">${a}</button>`).join("")}</div>
+      <select id="dmHalf">${halfOptions(br).map(k => `<option value="${k}" ${k === ui.half ? "selected" : ""}>${halfYearLabel(k)}</option>`).join("")}</select>
       <span class="dm-meta" style="margin-left:0;">평균 = 매니저만 (원장 직접 담당분은 회색 줄로 따로 표시) · 이탈률 = 종료 ÷ 월초 (담당 이동 '리퍼-'는 이탈에서 제외)</span></div>`;
 
     if (!cur.length) {
-      el.innerHTML = seg + `<div class="card"><div class="empty-state">${ui.ym.slice(0, 4)}년 ${Number(ui.ym.slice(5))}월 구성원 데이터가 없습니다. (등록현황에 해당 월 탭이 있는지 확인)</div></div>`;
+      el.innerHTML = seg + `<div class="card"><div class="empty-state">${halfYearLabel(ui.half)}에 구성원 데이터가 없습니다. (등록현황에 해당 월 탭이 있는지 확인)</div></div>`;
+      document.getElementById("dmHalf").onchange = e => { ui.half = e.target.value; draw(); };
       bindArea(); return;
     }
 
@@ -396,13 +435,74 @@ export async function renderDeepMetric(main, ctx) {
 
     el.innerHTML = seg + `
       <div class="card"><h2>지금 봐야 할 것 · ${ui.area}</h2><ul class="dm-ins">${memberInsights(cur, months, recsOf).map(s => `<li>${s}</li>`).join("") || "<li>평균에서 크게 벗어난 구성원이 없습니다.</li>"}</ul></div>
-      <div class="card"><h2>${Number(ui.ym.slice(5))}월 구성원별 지표</h2>${tbl}</div>
-      <div class="card"><h2 style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">최근 ${months.length}개월 · 평균 대비
+      ${hrEvalHtml(months, recsOf)}
+      <div class="card"><h2>${Number(snapMonth.slice(5))}월 구성원별 지표 <span style="font-weight:400;color:var(--text-muted);font-size:12px;">· ${halfYearLabel(ui.half)} 중 가장 최근 확정월</span></h2>${tbl}</div>
+      <div class="card"><h2 style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">${halfYearLabel(ui.half)} · 평균 대비
         <select id="dmMetricM" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font:inherit;font-size:13px;">${metrics.map(m => `<option value="${m.k}" ${m.k === ui.metricM ? "selected" : ""}>${m.label}</option>`).join("")}</select></h2>
         ${heat}<div style="margin-top:18px;">${lineChart(series, months.map(ymLabel), ui.metricM, { height: 220 })}</div>
         <p class="dm-note">${esc(mLabel)} 기준. 칸 색은 그 달 매니저 평균 대비(초록=좋음, 분홍=나쁨). 매니저 구성이 바뀐 달은 평균 비교 대상도 달라집니다.</p></div>`;
     bindArea();
+    document.getElementById("dmHalf").onchange = e => { ui.half = e.target.value; draw(); };
     document.getElementById("dmMetricM").onchange = e => { ui.metricM = e.target.value; draw(); };
+  }
+
+  /* ---------------- 반기 인사평가 요약 ---------------- */
+  // 코칭매니저(상담관리): 학생수(6개월 평균) · 이탈율(6개월 가중평균). 교실장(개별지도): 콤마수(6개월 평균) · 이탈율(6개월 가중평균).
+  function hrEvalHtml(months, recsOf) {
+    const evalMetrics = HR_EVAL_METRIC[ui.area];
+    const roleLabel = ui.area === "상담관리" ? "코칭매니저" : "교실장";
+    const mgrNames = [...new Set(months.flatMap(m => recsOf(m).filter(r => r.role === "매니저").map(r => r.name)))];
+    const recsByName = {};
+    mgrNames.forEach(n => {
+      recsByName[n] = months.map(m => recsOf(m).find(r => r.name === n && r.role === "매니저")).filter(Boolean);
+    });
+    function avgOf(recs, key) {
+      const vals = recs.map(r => r[key]).filter(v => v !== null && v !== undefined);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    }
+    function churnAggOf(recs) {
+      const sStart = recs.reduce((a, r) => a + (r.start || 0), 0);
+      const sEnd = recs.reduce((a, r) => a + (r.end || 0), 0);
+      return sStart ? sEnd / sStart : null;
+    }
+    const rows = mgrNames.map(n => {
+      const recs = recsByName[n];
+      const metricVals = {};
+      evalMetrics.forEach(m => { metricVals[m.key] = avgOf(recs, m.key); });
+      return { name: n, metricVals, churnAgg: churnAggOf(recs), monthCount: recs.length, start: recs.reduce((a, r) => a + (r.start || 0), 0) };
+    });
+    const teamMetric = {};
+    evalMetrics.forEach(m => {
+      const vs = rows.map(r => r.metricVals[m.key]).filter(v => v !== null);
+      teamMetric[m.key] = vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
+    });
+    const teamStart = rows.reduce((a, r) => a + r.start, 0);
+    const teamEnd = mgrNames.reduce((a, n) => a + recsByName[n].reduce((aa, r) => aa + (r.end || 0), 0), 0);
+    const teamChurn = teamStart ? teamEnd / teamStart : null;
+    const arrow = t => t === "good" ? "▲" : t === "bad" ? "▼" : "";
+    const body = rows.map(r => {
+      const metricCells = evalMetrics.map(m => {
+        const v = r.metricVals[m.key];
+        const t = v !== null && teamMetric[m.key] !== null ? judge(v - teamMetric[m.key], m.key, TOL[m.key] ?? 0) : "flat";
+        return `<td class="num" style="color:${toneColor[t]};font-weight:700;">${v === null ? "-" : fmt(v, m.key)} ${arrow(t)}</td>`;
+      }).join("");
+      const cTone = r.churnAgg !== null && teamChurn !== null ? judge(r.churnAgg - teamChurn, "churn", TOL.churn) : "flat";
+      return `<tr><td><b>${esc(r.name)}</b></td>${metricCells}
+        <td class="num" style="color:${toneColor[cTone]};font-weight:700;">${r.churnAgg === null ? "-" : fmt(r.churnAgg, "churn")} ${arrow(cTone)}</td>
+        <td class="num" style="color:var(--text-muted);">${r.monthCount}/${months.length}개월</td></tr>`;
+    }).join("");
+    const headCells = evalMetrics.map(m => `<th class="num">${esc(m.label)} (평균)</th>`).join("");
+    const teamRowCells = evalMetrics.map(m => `<td class="num">${teamMetric[m.key] === null ? "-" : fmt(teamMetric[m.key], m.key)}</td>`).join("");
+    const colCount = 2 + evalMetrics.length + 1;
+    return `<div class="card">
+      <h2>${halfYearLabel(ui.half)} 인사평가 요약 · ${roleLabel}</h2>
+      <p class="dm-note" style="margin:0 0 10px;">평가 요소: ${evalMetrics.map(m => `<b>${esc(m.label)}</b>`).join(" · ")}(6개월 평균) · <b>이탈율</b>(6개월 가중평균 = 반기 총종료 ÷ 총월초). ▲ 팀 평균보다 좋음 · ▼ 평균보다 나쁨.</p>
+      <div class="dm-scroll"><table class="dm-tbl"><thead><tr><th>${roleLabel}</th>${headCells}<th class="num">이탈율 (가중평균)</th><th class="num">데이터 있는 달</th></tr></thead><tbody>
+        ${body || `<tr><td colspan="${colCount}" style="text-align:center;color:var(--text-muted);">이 반기에는 데이터가 없습니다.</td></tr>`}
+        ${rows.length ? `<tr class="avg"><td>팀 평균</td>${teamRowCells}<td class="num">${teamChurn === null ? "-" : fmt(teamChurn, "churn")}</td><td></td></tr>` : ""}
+      </tbody></table></div>
+      <p class="dm-note">이번 반기가 아직 끝나지 않았다면(진행 중인 달 포함) 평균·가중평균에 지금까지 확정된 달만 반영됩니다.</p>
+    </div>`;
   }
   function bindArea() {
     document.querySelectorAll("#dmArea button").forEach(b => b.onclick = () => { ui.area = b.dataset.a; draw(); });
