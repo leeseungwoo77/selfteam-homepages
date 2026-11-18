@@ -1102,6 +1102,16 @@ function canCreateForBranch(section, branchId) {
   if (section.writable === "leader-and-branch") return branchId === state.profile.branchId;
   return false;
 }
+// "나만의 업무"(원장님 개인 업무)는 폴더의 전체 작성 권한(writable) 설정과 무관하게,
+// 팀장과 모든 지점 원장님(팀원)이 항상 등록할 수 있습니다. (뷰어는 등록 불가)
+function canAddMyTask() {
+  return state.profile.role === "leader" || state.profile.role === "member";
+}
+function canManageMyTask(task) {
+  if (state.profile.role === "viewer") return false;
+  if (state.profile.role === "leader") return true;
+  return task.ownerBranchId === state.profile.branchId;
+}
 
 /* ===================== 섹션 렌더링(목록) ===================== */
 async function renderSection(key) {
@@ -2641,13 +2651,21 @@ const TASK_TRACKING_EXCLUDED_BRANCHES = ["본사", "진학중계"];
 function taskTrackingBranches() {
   return state.branches.filter(b => !TASK_TRACKING_EXCLUDED_BRANCHES.includes(b.name));
 }
+// 공통 업무(팀장이 전 지점에 내린 지시)는 모든 지점이 "대상"이지만,
+// 원장님의 "나만의 업무"(private)는 그 원장님 지점 1곳만 대상입니다. 완료율 계산은 항상 "대상 지점" 기준입니다.
+function taskApplicableBranches(task, branches) {
+  if (task.private && task.ownerBranchId) return branches.filter(b => b.id === task.ownerBranchId);
+  return branches;
+}
 function taskDoneCount(task, branches) {
   const map = task.branchDone || {};
-  return branches.reduce((n, b) => n + (map[b.id] ? 1 : 0), 0);
+  const applicable = taskApplicableBranches(task, branches);
+  return applicable.reduce((n, b) => n + (map[b.id] ? 1 : 0), 0);
 }
 function taskCompletionRate(task, branches) {
-  if (!branches.length) return 0;
-  return Math.round((taskDoneCount(task, branches) / branches.length) * 100);
+  const applicable = taskApplicableBranches(task, branches);
+  if (!applicable.length) return 0;
+  return Math.round((taskDoneCount(task, branches) / applicable.length) * 100);
 }
 function sortTasksForTracking(docs, branches, sortState) {
   const { column, dir } = sortState || { column: "deadline", dir: "asc" };
@@ -2702,7 +2720,8 @@ async function autoRenewHiddenTasks(section, allDocs) {
     addDoc(collection(db, "folderEntries"), {
       folderId: section.folderId, title: task.title, deadline: nextDeadline, note: task.note || "",
       branchDone: {}, createdAt: new Date().toISOString(), createdBy: "자동 재등록(작년 업무)",
-      renewedFromId: task.id
+      renewedFromId: task.id,
+      ...(task.private ? { private: true, ownerBranchId: task.ownerBranchId, ownerBranchName: task.ownerBranchName } : {})
     }),
     updateDoc(doc(db, "folderEntries", task.id), { renewed: true, renewedAt: new Date().toISOString() })
   ])));
@@ -2723,7 +2742,8 @@ async function renderTaskTracking(section) {
       </div>
     </div>
     <div id="taskStatsWrap" style="margin-bottom:16px;"></div>
-    <div class="card" style="overflow:auto;"><div id="taskGridWrap">불러오는 중...</div></div>`;
+    <div class="card" style="overflow:auto;"><div id="taskGridWrap">불러오는 중...</div></div>
+    <div id="myTaskWrap"></div>`;
 
   document.getElementById("taskArchiveToggleBtn").onclick = () => {
     taskArchiveView[section.key] = !isArchive;
@@ -2757,10 +2777,12 @@ function renderTaskStats(tasks, branches) {
   const overdueCount = tasks.filter(t => taskDdayInfo(t.deadline)?.tone === "overdue" && taskCompletionRate(t, branches) < 100).length;
   const doneCount = tasks.filter(t => taskCompletionRate(t, branches) === 100).length;
 
+  // 지점별 완료율은 그 지점이 "대상"인 업무(공통 업무 + 그 지점 원장님의 나만의 업무)만 분모로 계산합니다.
   const branchRates = branches.map(b => {
-    const done = tasks.filter(t => t.branchDone && t.branchDone[b.id]).length;
-    const rate = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
-    return { branch: b, done, rate };
+    const applicableTasks = tasks.filter(t => taskApplicableBranches(t, branches).some(ab => ab.id === b.id));
+    const done = applicableTasks.filter(t => t.branchDone && t.branchDone[b.id]).length;
+    const rate = applicableTasks.length ? Math.round((done / applicableTasks.length) * 100) : 0;
+    return { branch: b, done, total: applicableTasks.length, rate };
   }).sort((a, b) => a.rate - b.rate); // 완료율이 낮은 지점을 먼저 보여줍니다.
 
   wrap.innerHTML = `<div class="stat-grid">
@@ -2780,7 +2802,7 @@ function renderTaskStats(tasks, branches) {
         <div style="background:var(--bg-soft,#EEF1EA);border-radius:6px;height:8px;overflow:hidden;">
           <div style="background:${rate === 100 ? "var(--green-bright)" : rate < 50 ? "#E8938C" : "var(--blue-bright)"};height:100%;width:${rate}%;"></div>
         </div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">${done}/${tasks.length}건 완료</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">${done}/${total}건 완료</div>
       </div>`).join("")}
     </div>
   </div>`;
@@ -2802,13 +2824,19 @@ function renderTaskTrackingBody(section, docs, isArchive) {
   if (!branches.length) { wrap.innerHTML = `<div class="empty-state">등록된 지점이 없습니다. "홈페이지 관리"에서 지점을 먼저 추가해주세요.</div>`; return; }
 
   const sortState = getTaskSortState(section.key);
-  const baseList = isArchive ? hiddenDocs : activeDocs;
+  // 공통 업무 표에는 "나만의 업무"(private)를 섞지 않고, 아래 별도 섹션에서만 보여줍니다.
+  const baseList = (isArchive ? hiddenDocs : activeDocs).filter(t => !t.private);
   const tasks = sortTasksForTracking(baseList, branches, sortState);
+
+  const myTaskPool = (isArchive ? hiddenDocs : activeDocs).filter(t => t.private);
+  // 읽기 범위는 화면(클라이언트)에서만 지점별로 제한합니다. 팀장·뷰어는 전체, 원장님(팀원)은 자기 지점 것만 봅니다.
+  const myTasks = canViewAllRole() ? myTaskPool : myTaskPool.filter(t => t.ownerBranchId === state.profile.branchId);
+  renderMyTasksSection(section, myTasks, isArchive, branches);
 
   if (!tasks.length) {
     wrap.innerHTML = isArchive
-      ? `<div class="empty-state">아직 보관된(숨긴) 업무가 없습니다.</div>`
-      : `<div class="empty-state">아직 등록된 업무가 없습니다.${canWriteSection(section) ? " 위에서 새 업무를 등록해보세요." : ""}</div>`;
+      ? `<div class="empty-state">아직 보관된(숨긴) 공통 업무가 없습니다.</div>`
+      : `<div class="empty-state">아직 등록된 공통 업무가 없습니다.${canWriteSection(section) ? " 위에서 새 업무를 등록해보세요." : ""}</div>`;
     return;
   }
 
@@ -2954,6 +2982,171 @@ function openTaskModal(section, existing) {
       } else {
         await addDoc(collection(db, "folderEntries"), {
           folderId: section.folderId, title, deadline, note,
+          branchDone: {}, createdAt: new Date().toISOString(), createdBy: state.profile.name
+        });
+      }
+      root.innerHTML = "";
+      showToast("저장되었습니다.");
+      renderSection(section.key);
+    } catch (err) {
+      saveBtn.disabled = false;
+      alert("저장 중 오류가 발생했습니다: " + err.message);
+    }
+  });
+}
+
+/* ===================== 나만의 업무(원장님 개인 업무) =====================
+   지점 업무 체크리스트 안에, 해당 지점 원장님이 혼자 올리고 "자신 + 팀장"만 보는 개인 업무 목록입니다.
+   - folderEntries 문서에 private:true, ownerBranchId, ownerBranchName 을 추가로 저장합니다.
+   - 완료 체크는 공통 업무와 똑같이 branchDone.{ownerBranchId} 에 저장해서, 완료율 계산 로직을 그대로 재사용합니다.
+   - 읽기 범위 제한은 화면(클라이언트)에서만 적용됩니다. (다른 지점 원장님에게는 화면에 보이지 않지만, Firestore 조회 자체를 지점별로
+     나눌 수는 없어서 — 같은 폴더의 공통 업무 조회와 쿼리를 공유하기 때문 — 서버 차원의 "읽기" 차단은 아닙니다.
+     반면 등록/수정/삭제(쓰기)는 firestore.rules에서 본인 지점 + 팀장만 가능하도록 서버에서도 막아둡니다.)
+=========================================================== */
+function renderMyTasksSection(section, tasks, isArchive, branches) {
+  const wrap = document.getElementById("myTaskWrap");
+  if (!wrap) return;
+  const isLeaderView = canViewAllRole();
+  const canAdd = !isArchive && canAddMyTask();
+
+  let bodyHtml;
+  if (!tasks.length) {
+    bodyHtml = `<div class="empty-state" style="padding:16px 0;">${isArchive ? "보관된 나만의 업무가 없습니다." : "등록된 나만의 업무가 없습니다."}</div>`;
+  } else {
+    const groups = isLeaderView
+      ? branches.map(b => ({ branch: b, list: tasks.filter(t => t.ownerBranchId === b.id) })).filter(g => g.list.length)
+      : [{ branch: null, list: tasks }];
+    bodyHtml = groups.map(({ branch, list }) => `
+      ${branch ? `<h3 style="margin:16px 0 8px;font-size:13.5px;">${escapeHtml(branch.name)}</h3>` : ""}
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${list.map(task => {
+          const checked = !!(task.branchDone && task.branchDone[task.ownerBranchId]);
+          const dday = taskDdayInfo(task.deadline);
+          const canManage = canManageMyTask(task);
+          const canToggle = !isArchive && canManage;
+          return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--border,#E5E7E0);border-radius:8px;${checked ? "opacity:.6;" : ""}">
+            <input type="checkbox" data-mytask-toggle="${task.id}" ${checked ? "checked" : ""} ${canToggle ? "" : "disabled"} style="width:18px;height:18px;margin-top:2px;cursor:${canToggle ? "pointer" : "default"};">
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;${checked ? "text-decoration:line-through;" : ""}">${escapeHtml(task.title || "")}</div>
+              ${task.note ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;white-space:pre-wrap;">${escapeHtml(task.note)}</div>` : ""}
+              <div style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap;">
+                ${task.deadline ? `<span class="mono" style="font-size:12px;color:var(--text-muted);">${escapeHtml(task.deadline)}</span>` : ""}
+                ${!isArchive && dday ? `<span class="pill" style="display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;${TASK_TONE_STYLE[dday.tone]}">${dday.label}</span>` : ""}
+              </div>
+            </div>
+            ${canManage ? `<div style="display:flex;gap:4px;white-space:nowrap;">
+              ${isArchive
+                ? `<button class="icon-btn" data-mytask-restore="${task.id}">복원</button><button class="icon-btn danger" data-mytask-del="${task.id}">삭제</button>`
+                : `<button class="icon-btn" data-mytask-edit="${task.id}">수정</button><button class="icon-btn" data-mytask-hide="${task.id}">숨기기</button><button class="icon-btn danger" data-mytask-del="${task.id}">삭제</button>`}
+            </div>` : ""}
+          </div>`;
+        }).join("")}
+      </div>`).join("");
+  }
+
+  wrap.innerHTML = `<div class="card" style="margin-top:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:8px;">
+      <h2 style="margin:0;">나만의 업무${isArchive ? " · 보관함" : ""}</h2>
+      ${canAdd ? `<button class="btn small secondary" id="addMyTaskBtn">+ 내 업무 등록</button>` : ""}
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">원장님 자신과 팀장님만 보는 개인 업무예요. (다른 지점에는 보이지 않아요)</p>
+    ${bodyHtml}
+  </div>`;
+
+  if (canAdd) {
+    document.getElementById("addMyTaskBtn").onclick = () => openMyTaskModal(section, null);
+  }
+  wrap.querySelectorAll("[data-mytask-toggle]").forEach(chk => {
+    chk.onchange = async () => {
+      const taskId = chk.dataset.mytaskToggle;
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
+      const wasChecked = chk.checked;
+      chk.disabled = true;
+      try {
+        await updateDoc(doc(db, "folderEntries", taskId), { [`branchDone.${task.ownerBranchId}`]: wasChecked });
+        renderSection(section.key);
+      } catch (err) {
+        chk.checked = !wasChecked;
+        chk.disabled = false;
+        alert("저장 중 오류가 발생했습니다: " + err.message);
+      }
+    };
+  });
+  wrap.querySelectorAll("[data-mytask-edit]").forEach(btn => {
+    btn.onclick = () => openMyTaskModal(section, tasks.find(t => t.id === btn.dataset.mytaskEdit));
+  });
+  wrap.querySelectorAll("[data-mytask-hide]").forEach(btn => {
+    btn.onclick = async () => {
+      await updateDoc(doc(db, "folderEntries", btn.dataset.mytaskHide), { hidden: true, hiddenAt: new Date().toISOString() });
+      showToast("보관함으로 옮겼습니다.");
+      renderSection(section.key);
+    };
+  });
+  wrap.querySelectorAll("[data-mytask-restore]").forEach(btn => {
+    btn.onclick = async () => {
+      await updateDoc(doc(db, "folderEntries", btn.dataset.mytaskRestore), { hidden: false });
+      showToast("복원되었습니다.");
+      renderSection(section.key);
+    };
+  });
+  wrap.querySelectorAll("[data-mytask-del]").forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm(isArchive ? "보관함에서 이 업무를 완전히 삭제할까요? 되돌릴 수 없습니다." : "이 업무를 삭제할까요?")) return;
+      await deleteDoc(doc(db, "folderEntries", btn.dataset.mytaskDel));
+      showToast("삭제되었습니다.");
+      renderSection(section.key);
+    };
+  });
+}
+
+function openMyTaskModal(section, existing) {
+  const root = document.getElementById("modalRoot");
+  const branches = taskTrackingBranches();
+  const isLeader = state.profile.role === "leader";
+  const showBranchPicker = isLeader && !existing;
+
+  root.innerHTML = `<div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>${existing ? "내 업무 수정" : "내 업무 등록"} · 나만의 업무</h3>
+      <form id="myTaskForm">
+        ${showBranchPicker
+          ? `<div class="field"><label>지점</label><select id="myTaskBranch">${branches.map(b => `<option value="${b.id}" data-name="${escapeHtml(b.name)}">${escapeHtml(b.name)}</option>`).join("")}</select></div>`
+          : `<p style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px;">지점: ${escapeHtml(existing ? (existing.ownerBranchName || "") : (state.profile.branchName || ""))}</p>`}
+        <div class="field"><label>업무명</label><input type="text" id="myTaskTitle" value="${escapeHtml(existing?.title || "")}" placeholder="예: 10월 학부모 상담 정리" required></div>
+        <div class="field"><label>마감기한(선택)</label><input type="date" id="myTaskDeadline" value="${escapeHtml(existing?.deadline || "")}"></div>
+        <div class="field"><label>메모(선택)</label><textarea id="myTaskNote" rows="3" placeholder="잊지 않게 적어두고 싶은 내용을 써주세요.">${escapeHtml(existing?.note || "")}</textarea></div>
+        <p style="font-size:11px;color:var(--text-muted);margin:-6px 0 10px;">이 업무는 나와 팀장님만 볼 수 있어요.</p>
+        <div class="grid-2" style="margin-top:10px;">
+          <button type="button" class="btn secondary" id="cancelMyTaskBtn">취소</button>
+          <button type="submit" class="btn" id="saveMyTaskBtn">저장</button>
+        </div>
+      </form>
+    </div></div>`;
+  document.getElementById("cancelMyTaskBtn").onclick = () => root.innerHTML = "";
+  document.getElementById("modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") root.innerHTML = ""; });
+  document.getElementById("myTaskForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = document.getElementById("myTaskTitle").value.trim();
+    if (!title) return;
+    const deadline = document.getElementById("myTaskDeadline").value;
+    const note = document.getElementById("myTaskNote").value.trim();
+    const saveBtn = document.getElementById("saveMyTaskBtn");
+    saveBtn.disabled = true;
+    try {
+      if (existing) {
+        await updateDoc(doc(db, "folderEntries", existing.id), { title, deadline, note });
+      } else {
+        let ownerBranchId = state.profile.branchId;
+        let ownerBranchName = state.profile.branchName || "";
+        const branchSel = document.getElementById("myTaskBranch");
+        if (branchSel) {
+          ownerBranchId = branchSel.value;
+          ownerBranchName = branchSel.selectedOptions[0]?.dataset.name || "";
+        }
+        await addDoc(collection(db, "folderEntries"), {
+          folderId: section.folderId, title, deadline, note,
+          private: true, ownerBranchId, ownerBranchName,
           branchDone: {}, createdAt: new Date().toISOString(), createdBy: state.profile.name
         });
       }
