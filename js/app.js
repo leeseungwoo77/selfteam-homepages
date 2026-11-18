@@ -2794,7 +2794,7 @@ function renderTaskStats(tasks, branches) {
   <div class="card" style="margin-top:0;">
     <h2 style="margin:0 0 12px;">지점별 지시 완료율</h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;">
-      ${branchRates.map(({ branch, done, rate }) => `<div>
+      ${branchRates.map(({ branch, done, total, rate }) => `<div>
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
           <span style="font-weight:700;font-size:13.5px;">${escapeHtml(branch.name)}</span>
           <span class="mono" style="font-size:12.5px;font-weight:700;color:${rate < 50 ? "#C0392B" : "var(--blue-deep)"};">${rate}%</span>
