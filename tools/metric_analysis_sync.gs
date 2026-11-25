@@ -7,7 +7,8 @@
  *  2) Firebase(Firestore) customFolders/{FOLDER_DOC_ID} 문서의
  *     sheetData / sheetFileName / sheetUpdatedAt 세 필드만 덮어씁니다.
  *     (updateMask로 이 세 필드만 바꾸므로, 메뉴 이름·권한 등 다른 설정은 그대로 유지됩니다)
- *  3) 매일 자동 갱신 (setupMetricAnalysisDailyTrigger 1회 실행)
+ *  3) 5분마다 자동 갱신 (setupMetricAnalysisFastTrigger 1회 실행 — 2026.11 변경: 기존엔 매일
+ *     1번이었는데, "거의 실시간"으로 쓸 수 있게 간격을 줄였어요)
  *
  * 설치 (팀장, 1회)
  *  1. 기존 "지점·구성원 지표분석" 수집기(metrics_collector.gs)를 넣어둔 Apps Script
@@ -22,7 +23,10 @@
  *       "현재 연결된 데이터: 구글시트 자동 동기화 (...자동 갱신)"로 바뀐 걸 확인
  *     - 403 오류가 나면 metrics_collector.gs의 "권한 오류(403)"와 똑같은 원인입니다.
  *       (이 스크립트를 실행하는 구글 계정이 Firebase 프로젝트 "편집자"로 등록돼 있어야 함)
- *  5. 함수 setupMetricAnalysisDailyTrigger 실행 (매일 자동 동기화 등록)
+ *  5. 함수 setupMetricAnalysisFastTrigger 실행 (5분마다 자동 동기화 등록)
+ *     - 예전에 setupMetricAnalysisDailyTrigger(매일 1번)를 이미 실행해두셨다면, 이번엔
+ *       setupMetricAnalysisFastTrigger를 실행하면 자동으로 예전 매일 트리거를 지우고
+ *       5분 간격 트리거로 바꿔줍니다. (둘 다 실행해둘 필요 없어요, 1개만 남아요)
  *
  * 참고: 이 스크립트는 시트를 "링크 공개"로 바꿀 필요가 전혀 없습니다. 이 스크립트를
  * 실행하는 구글 계정이 평소 그 시트를 볼 수 있으면(공유돼 있으면) 그대로 동작해요.
@@ -91,6 +95,15 @@ function pushMetricAnalysisToFirestore_(newSheetData) {
   }
 }
 
+// 5분마다 자동 동기화 (거의 실시간). 기존에 setupMetricAnalysisDailyTrigger(매일 1번)로
+// 만들어둔 트리거가 있어도 이 함수가 먼저 지우고 새로 만들어서, 트리거가 중복되지 않습니다.
+function setupMetricAnalysisFastTrigger() {
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'syncMetricAnalysisSheet')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('syncMetricAnalysisSheet').timeBased().everyMinutes(5).create();
+}
+// 예전 방식(매일 1번, 새벽 7시)으로 되돌리고 싶을 때만 쓰세요. 보통은 위 함수만 쓰면 됩니다.
 function setupMetricAnalysisDailyTrigger() {
   ScriptApp.getProjectTriggers()
     .filter(t => t.getHandlerFunction() === 'syncMetricAnalysisSheet')

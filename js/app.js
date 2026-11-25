@@ -3615,6 +3615,8 @@ function openRoutineModal(section, existing, defaultCadence) {
   });
 }
 
+// "지표 분석"에서 올리는 바로 그 원본 구글 시트 (tools/metric_analysis_sync.gs의 METRIC_ANALYSIS_SHEET_ID와 동일)
+const METRIC_ANALYSIS_SHEET_ID = "10KwiAbBdzcP88BKHL2dzFzTN3yzPXuKTSxQRkPct9zo";
 /* ===================== 지표 분석 - 연결한 구글 시트 기반 다양한 분석 ===================== */
 function extractSheetId(url) {
   const m = String(url || "").match(/\/d\/([a-zA-Z0-9-_]+)/);
@@ -4040,8 +4042,9 @@ async function renderMetricAnalysis(section) {
     ${isLeader ? `
     <div class="card">
       <h2>엑셀 파일 업로드</h2>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">엑셀 파일(.xlsx)을 올리면 그 안의 모든 탭을 한 번에 읽어서 저장해요. 나중에 데이터가 바뀌면 새 파일을 다시 올려서 덮어쓰시면 돼요 (구글 계정 연결 없이 바로 반영돼요). Apps Script로 구글시트 자동 동기화를 설정해두면 이 버튼을 누르지 않아도 매일 자동으로 최신 데이터가 반영돼요 (<code>tools/metric_analysis_sync.gs</code> 참고) — 수동 업로드는 그 사이에 급하게 반영하고 싶을 때만 쓰시면 돼요.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">엑셀 파일(.xlsx)을 올리면 그 안의 모든 탭을 한 번에 읽어서 저장해요. 나중에 데이터가 바뀌면 새 파일을 다시 올려서 덮어쓰시면 돼요 (구글 계정 연결 없이 바로 반영돼요). Apps Script로 구글시트 자동 동기화를 설정해두면 이 버튼을 누르지 않아도 5분마다 자동으로 최신 데이터가 반영돼요 (<code>tools/metric_analysis_sync.gs</code> 참고) — 지금 바로 당겨오고 싶으면 아래 "지금 동기화" 버튼을 눌러도 돼요(처음 누를 땐 구글 로그인 창이 한 번 떠요).</p>
       <input type="file" id="metricFileInput" accept=".xlsx,.xls">
+      <button type="button" class="btn small secondary" id="syncNowBtn" style="margin-left:8px;">지금 동기화</button>
       <p id="metricUploadStatus" style="font-size:12px;color:var(--text-muted);margin-top:8px;">${folder?.sheetFileName ? `현재 연결된 데이터: <strong>${escapeHtml(folder.sheetFileName)}</strong> (${escapeHtml(fmtSheetUpdatedAt(folder.sheetUpdatedAt))} ${folder.sheetFileName.includes("자동 동기화") ? "자동 갱신" : "업로드"})` : ""}</p>
       <p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">각 탭은 A열=지표명, B열=연도, C열부터 1~12월 값 형식이어야 해요.</p>
     </div>` : (!folder?.sheetFileName ? `<div class="card"><div class="empty-state">아직 팀장이 연결한 파일이 없습니다.</div></div>` : "")}
@@ -4238,6 +4241,37 @@ async function renderMetricAnalysis(section) {
         renderSection(section.key);
       } catch (err) {
         statusEl.textContent = "읽기 실패: " + err.message;
+      }
+    });
+
+    // "지금 동기화" — Apps Script 자동 동기화(5분 간격)를 기다리지 않고, 지금 이 화면에서
+    // 구글 로그인(OAuth)으로 직접 구글시트 최신 값을 읽어와 바로 반영합니다.
+    const syncNowBtn = document.getElementById("syncNowBtn");
+    syncNowBtn.addEventListener("click", async () => {
+      if (!folder) return;
+      const statusEl = document.getElementById("metricUploadStatus");
+      const prevLabel = syncNowBtn.textContent;
+      syncNowBtn.disabled = true;
+      syncNowBtn.textContent = "동기화 중...";
+      try {
+        const tabNames = await fetchSheetTabNames(METRIC_ANALYSIS_SHEET_ID);
+        const newSheetData = {};
+        for (const name of tabNames) {
+          const rows = await fetchSheetValues(METRIC_ANALYSIS_SHEET_ID, name);
+          if (rows.length) newSheetData[name] = trimSheetRows(rows);
+        }
+        await updateDoc(doc(db, "customFolders", folder.id), {
+          sheetData: JSON.stringify(newSheetData),
+          sheetFileName: "구글시트 자동 동기화 (지금 동기화)",
+          sheetUpdatedAt: new Date().toISOString()
+        });
+        await loadCustomFolders();
+        showToast("최신 데이터로 반영했어요.");
+        renderSection(section.key);
+      } catch (err) {
+        if (statusEl) statusEl.textContent = "지금 동기화 실패: " + err.message;
+        syncNowBtn.disabled = false;
+        syncNowBtn.textContent = prevLabel;
       }
     });
   }
