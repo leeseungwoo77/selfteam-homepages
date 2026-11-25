@@ -3935,6 +3935,14 @@ function trimSheetRows(rows) {
   });
   return rows.map(r => r.slice(0, maxCols));
 }
+// 보통은 문자열(ISO 날짜 텍스트)로 저장되지만, 혹시 다른 경로(예: Apps Script)로
+// Firestore 타임스탬프 타입이 들어와도 화면이 깨지지 않도록 안전하게 문자열로 바꿔줍니다.
+function fmtSheetUpdatedAt(val) {
+  if (!val) return "";
+  if (typeof val === "string") return val.slice(0, 16).replace("T", " ");
+  if (typeof val.toDate === "function") { try { return val.toDate().toISOString().slice(0, 16).replace("T", " "); } catch (err) { return ""; } }
+  return String(val).slice(0, 16);
+}
 async function renderMetricAnalysis(section) {
   const main = document.getElementById("mainContent");
   const folder = state.customFolders.find(f => f.id === section.folderId);
@@ -3952,7 +3960,7 @@ async function renderMetricAnalysis(section) {
       <h2>엑셀 파일 업로드</h2>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">엑셀 파일(.xlsx)을 올리면 그 안의 모든 탭을 한 번에 읽어서 저장해요. 나중에 데이터가 바뀌면 새 파일을 다시 올려서 덮어쓰시면 돼요 (구글 계정 연결 없이 바로 반영돼요). Apps Script로 구글시트 자동 동기화를 설정해두면 이 버튼을 누르지 않아도 매일 자동으로 최신 데이터가 반영돼요 (<code>tools/metric_analysis_sync.gs</code> 참고) — 수동 업로드는 그 사이에 급하게 반영하고 싶을 때만 쓰시면 돼요.</p>
       <input type="file" id="metricFileInput" accept=".xlsx,.xls">
-      <p id="metricUploadStatus" style="font-size:12px;color:var(--text-muted);margin-top:8px;">${folder?.sheetFileName ? `현재 연결된 데이터: <strong>${escapeHtml(folder.sheetFileName)}</strong> (${escapeHtml((folder.sheetUpdatedAt || "").slice(0, 16).replace("T", " "))} ${folder.sheetFileName.includes("자동 동기화") ? "자동 갱신" : "업로드"})` : ""}</p>
+      <p id="metricUploadStatus" style="font-size:12px;color:var(--text-muted);margin-top:8px;">${folder?.sheetFileName ? `현재 연결된 데이터: <strong>${escapeHtml(folder.sheetFileName)}</strong> (${escapeHtml(fmtSheetUpdatedAt(folder.sheetUpdatedAt))} ${folder.sheetFileName.includes("자동 동기화") ? "자동 갱신" : "업로드"})` : ""}</p>
       <p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">각 탭은 A열=지표명, B열=연도, C열부터 1~12월 값 형식이어야 해요.</p>
     </div>` : (!folder?.sheetFileName ? `<div class="card"><div class="empty-state">아직 팀장이 연결한 파일이 없습니다.</div></div>` : "")}
     <div id="metricModeToggle" style="display:none;gap:8px;margin-bottom:6px;flex-wrap:wrap;">

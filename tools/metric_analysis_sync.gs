@@ -73,7 +73,10 @@ function pushMetricAnalysisToFirestore_(newSheetData) {
     fields: {
       sheetData: { stringValue: JSON.stringify(newSheetData) },
       sheetFileName: { stringValue: '구글시트 자동 동기화' },
-      sheetUpdatedAt: { timestampValue: new Date().toISOString() },
+      // 홈페이지의 수동 업로드 코드도 이 값을 일반 문자열(ISO 날짜 텍스트)로 저장하므로,
+      // Firestore 전용 타임스탬프 타입(timestampValue)이 아니라 반드시 문자열(stringValue)로 저장해야
+      // 화면에서 .slice()로 날짜를 잘라 보여주는 부분이 깨지지 않습니다.
+      sheetUpdatedAt: { stringValue: new Date().toISOString() },
     }
   };
   const res = UrlFetchApp.fetch(url, {
