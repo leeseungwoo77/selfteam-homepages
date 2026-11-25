@@ -3669,11 +3669,15 @@ function parseMetricSheet(rows) {
   }
   return { months, years: [...yearSet], metrics, metricOrder };
 }
-// "연도 | 지표명 | 지점 | 1월~12월" 형식(여러 지점 데이터를 한 탭에 몰아넣은 "가로형" 표)도 함께 지원합니다.
+// "연도 | 지표명(또는 구분) | 지점 | 1월~12월" 형식(여러 지점 데이터를 한 탭에 몰아넣은 "가로형" 표)도 함께 지원합니다.
 // 기존 지점별 탭(A=지표명, B=연도, C열부터 월값) 형식과는 첫 줄(헤더) 모양으로 자동 구분합니다.
+// B열 제목은 "지표명"이든 "구분"이든 상관없이(그 칸의 실제 역할만 중요) A열=연도, C열=지점이고
+// D열부터 "1월"~"12월" 같은 월 칸이 실제로 있는 탭만 가로형 표로 인식합니다. (월 칸이 없으면
+// "코드"(검증용 참고 목록) 같은 탭이 섞여 들어올 수 있어서, 월 칸 존재 여부로 한 번 더 걸러냅니다)
 function isWideMetricHeader(header) {
   const h = (header || []).map(c => (c || "").toString().trim());
-  return h[0] === "연도" && h[1] === "지표명" && h[2] === "지점";
+  if (h[0] !== "연도" || h[2] !== "지점") return false;
+  return h.slice(3).some(m => /^\d{1,2}월$/.test(m));
 }
 function parseWideMetricTab(rows) {
   const byBranch = {};
@@ -4002,9 +4006,24 @@ function trimSheetRows(rows) {
 // Firestore 타임스탬프 타입이 들어와도 화면이 깨지지 않도록 안전하게 문자열로 바꿔줍니다.
 function fmtSheetUpdatedAt(val) {
   if (!val) return "";
-  if (typeof val === "string") return val.slice(0, 16).replace("T", " ");
-  if (typeof val.toDate === "function") { try { return val.toDate().toISOString().slice(0, 16).replace("T", " "); } catch (err) { return ""; } }
-  return String(val).slice(0, 16);
+  let d = null;
+  if (typeof val === "string") {
+    d = new Date(val);
+  } else if (typeof val.toDate === "function") {
+    try { d = val.toDate(); } catch (err) { d = null; }
+  }
+  if (!d || isNaN(d.getTime())) {
+    // 날짜로 못 바꾸면(예전 데이터 등) 기존 방식으로라도 보여줌
+    return typeof val === "string" ? val.slice(0, 16).replace("T", " ") : String(val).slice(0, 16);
+  }
+  // 저장은 UTC(ISO) 기준이라, 화면엔 항상 한국시간(Asia/Seoul)으로 변환해서 보여줌
+  const parts = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(d);
+  const get = (type) => parts.find(p => p.type === type)?.value || "";
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
 }
 async function renderMetricAnalysis(section) {
   const main = document.getElementById("mainContent");
@@ -4301,9 +4320,22 @@ async function renderMetricAnalysis(section) {
     // 지점 소속 팀원(원장님)은 자기 지점만 볼 수 있게, 이 지표 분석 안의 모든 "지점" 선택란을 제한합니다.
     const restrictedBranch = canViewAllRole() ? null : (tabNames.includes(state.profile.branchName) ? state.profile.branchName : null);
     const branchOptionsFor = (allTabs) => restrictedBranch ? allTabs.filter(t => t === restrictedBranch) : allTabs;
+    // 지표 선택지/연도/월은 첫 지점 탭 하나만 보고 만들면, 그 지점엔 없고 다른 지점에만 있는 지표(예: 특정
+    // 지점에서만 입력한 유입지표·튜터인건비 등)가 선택란에 아예 안 뜨는 문제가 생깁니다. 그래서 모든 지점
+    // 탭을 합쳐서(합집합) 지표명/연도/월 목록을 만듭니다.
+    const metricOrderSeen = new Set();
+    const allMetricOrder = [];
+    const yearsSeen = new Set();
+    const monthsSeen = new Set();
+    tabNames.forEach(t => {
+      const p = getParsedTab(null, t);
+      p.metricOrder.forEach(m => { if (!metricOrderSeen.has(m)) { metricOrderSeen.add(m); allMetricOrder.push(m); } });
+      p.years.forEach(y => yearsSeen.add(y));
+      p.months.forEach(m => monthsSeen.add(m));
+    });
     // 혹시 지표 형식이 아닌 탭이 섞여 있어도, 연도/월처럼 안 생긴 값은 걸러내서 선택란에 이상한 값이 안 뜨게 합니다.
-    const years = [...firstParsed.years].filter(y => /^\d{4}년$/.test(y)).sort();
-    const months = firstParsed.months.filter(m => /^\d{1,2}월$/.test(m) || /^\d{2}년\s*\d{1,2}월$/.test(m));
+    const years = [...yearsSeen].filter(y => /^\d{4}년$/.test(y)).sort();
+    const months = [...monthsSeen].filter(m => /^\d{1,2}월$/.test(m) || /^\d{2}년\s*\d{1,2}월$/.test(m));
     const stdMonths = months.filter(m => /^\d{1,2}월$/.test(m));
 
     // 두 기준 비교
@@ -4320,12 +4352,12 @@ async function renderMetricAnalysis(section) {
 
     // 지표 상관관계
     document.getElementById("corrBranch").innerHTML = branchOptionsFor(tabNames).map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
-    document.getElementById("corrMetricA").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
-    document.getElementById("corrMetricB").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
-    if (firstParsed.metricOrder.length > 1) document.getElementById("corrMetricB").value = firstParsed.metricOrder[1];
+    document.getElementById("corrMetricA").innerHTML = allMetricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    document.getElementById("corrMetricB").innerHTML = allMetricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    if (allMetricOrder.length > 1) document.getElementById("corrMetricB").value = allMetricOrder[1];
 
     // 지표별 전체 지점 비교
-    document.getElementById("allMetricSelect").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    document.getElementById("allMetricSelect").innerHTML = allMetricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
     document.getElementById("allYearSelect").innerHTML = years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
     document.getElementById("allYearSelect").value = years[years.length - 1];
     document.getElementById("allMonthsHolder").innerHTML = months.map(m => `<label style="font-size:12px;display:flex;align-items:center;gap:4px;background:#F4FAEF;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;">
@@ -4340,7 +4372,7 @@ async function renderMetricAnalysis(section) {
     document.getElementById("dashMonth").innerHTML = stdMonths.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
 
     // 추이 그래프
-    document.getElementById("trendMetric").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    document.getElementById("trendMetric").innerHTML = allMetricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
     document.getElementById("trendBranchHolder").innerHTML = branchOptionsFor(tabNames).map((t, i) => `<label style="font-size:12px;display:flex;align-items:center;gap:4px;background:#F4FAEF;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;">
       <input type="checkbox" class="trendBranchChk" value="${escapeHtml(t)}" ${i === 0 ? "checked" : ""}>${escapeHtml(t)}
     </label>`).join("");
@@ -4368,7 +4400,7 @@ async function renderMetricAnalysis(section) {
     </label>`).join("");
     if (months.length) document.querySelector(`.rankMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
     document.getElementById("rankMetricsHolder").innerHTML = `<div style="display:grid;grid-template-columns:1fr 90px;gap:8px 10px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:10px;">
-      ${firstParsed.metricOrder.filter(m => RUBRIC_METRIC_MAP[m]).map(m => `
+      ${allMetricOrder.filter(m => RUBRIC_METRIC_MAP[m]).map(m => `
         <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;"><input type="checkbox" class="rankMetricChk" value="${escapeHtml(m)}" checked>${escapeHtml(m)}</label>
         <input type="number" class="rankMetricWeight" data-metric="${escapeHtml(m)}" value="1" min="0" step="0.5">
       `).join("")}
@@ -4377,7 +4409,7 @@ async function renderMetricAnalysis(section) {
 
     // 이상치
     document.getElementById("anomalyBranch").innerHTML = (restrictedBranch ? "" : `<option value="__all__">전체 지점</option>`) + branchOptionsFor(tabNames).map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
-    document.getElementById("anomalyMetric").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    document.getElementById("anomalyMetric").innerHTML = allMetricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
 
     document.getElementById("metricModeToggle").style.display = "flex";
     // 메뉴에서 "지표 분석"을 누르면 요약 대시보드가 아니라 "분석 기록"이 바로 보이게 합니다.
