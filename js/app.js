@@ -3669,6 +3669,49 @@ function parseMetricSheet(rows) {
   }
   return { months, years: [...yearSet], metrics, metricOrder };
 }
+// "연도 | 지표명 | 지점 | 1월~12월" 형식(여러 지점 데이터를 한 탭에 몰아넣은 "가로형" 표)도 함께 지원합니다.
+// 기존 지점별 탭(A=지표명, B=연도, C열부터 월값) 형식과는 첫 줄(헤더) 모양으로 자동 구분합니다.
+function isWideMetricHeader(header) {
+  const h = (header || []).map(c => (c || "").toString().trim());
+  return h[0] === "연도" && h[1] === "지표명" && h[2] === "지점";
+}
+function parseWideMetricTab(rows) {
+  const byBranch = {};
+  if (!rows || !rows.length) return byBranch;
+  const header = rows[0] || [];
+  const months = header.slice(3).map(m => (m || "").toString().trim());
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const year = (row[0] || "").toString().trim();
+    const metric = (row[1] || "").toString().trim();
+    const branch = (row[2] || "").toString().trim();
+    if (!year || !metric || !branch) continue;
+    const monthVals = {};
+    months.forEach((m, idx) => { if (m) monthVals[m] = parseMetricNumber(row[3 + idx]); });
+    if (!byBranch[branch]) byBranch[branch] = [];
+    byBranch[branch].push({ metric, year, monthVals });
+  }
+  return byBranch;
+}
+// sheetData 안의 모든 탭을 훑어서, "가로형" 표에 들어있는 지점별 지표를 미리 지점 이름별로 묶어둡니다.
+// 지점별 탭이 아예 없어도(가로형 표 하나만 있어도) 이 결과만으로 지점 탭을 "가상으로" 만들 수 있도록
+// 월 목록(months)도 함께 돌려줍니다.
+function buildWideMetricIndex(sheetData) {
+  const byBranch = {}; // 지점명 -> [{metric, year, monthVals}, ...]
+  let months = null;
+  if (!sheetData) return { byBranch, months: [] };
+  Object.keys(sheetData).forEach(tabName => {
+    const rows = sheetData[tabName];
+    if (!rows || !rows.length || !isWideMetricHeader(rows[0])) return;
+    if (!months) months = (rows[0] || []).slice(3).map(m => (m || "").toString().trim()).filter(Boolean);
+    const parsed = parseWideMetricTab(rows);
+    Object.keys(parsed).forEach(branch => {
+      if (!byBranch[branch]) byBranch[branch] = [];
+      byBranch[branch].push(...parsed[branch]);
+    });
+  });
+  return { byBranch, months: months || [] };
+}
 function aggregateMetric(parsed, metricName, yearLabel, monthLabels, mode) {
   const yearData = parsed.metrics[metricName] && parsed.metrics[metricName][yearLabel];
   if (!yearData) return null;
@@ -3680,6 +3723,26 @@ function aggregateMetric(parsed, metricName, yearLabel, monthLabels, mode) {
 function prevYearLabel(yearLabel) {
   const m = String(yearLabel || "").match(/(\d{4})/);
   return m ? (parseInt(m[1], 10) - 1) + "년" : null;
+}
+// "N시즌(월~월)" 라벨 하나가 어느 연도의 어느 달들로 이루어지는지. 4시즌(12~2월)만 다음 해 1~2월까지 걸칩니다.
+// (예: "2026년 4시즌" = 2026년 12월 + 2027년 1~2월)
+function seasonMonthKeys(seasonDef) {
+  if (seasonDef.n === 1) return [[0, "3월"], [0, "4월"], [0, "5월"]];
+  if (seasonDef.n === 2) return [[0, "6월"], [0, "7월"], [0, "8월"]];
+  if (seasonDef.n === 3) return [[0, "9월"], [0, "10월"], [0, "11월"]];
+  return [[0, "12월"], [1, "1월"], [1, "2월"]]; // 4시즌
+}
+function aggregateSeasonMetric(parsed, metricName, seasonYearLabel, seasonDef, mode) {
+  const baseYear = parseInt(String(seasonYearLabel || "").match(/(\d{4})/)?.[1], 10);
+  if (!baseYear) return null;
+  const metricData = parsed.metrics[metricName];
+  if (!metricData) return null;
+  const vals = seasonMonthKeys(seasonDef)
+    .map(([yOff, m]) => { const yd = metricData[(baseYear + yOff) + "년"]; return yd ? yd[m] : null; })
+    .filter(v => v !== null && v !== undefined);
+  if (!vals.length) return null;
+  const sum = vals.reduce((a, b) => a + b, 0);
+  return mode === "sum" ? sum : sum / vals.length;
 }
 // 연도×월을 시간순으로 쭉 이어붙인 타임라인을 만듭니다. (다음해 예고용 칸인 "27년 1월" 같은 건 제외)
 function buildTimeline(parsed, metricName) {
@@ -4053,11 +4116,22 @@ async function renderMetricAnalysis(section) {
 
     <div class="card" id="metricYoyCard" style="display:none;">
       <h2>전년 대비 증감률 (전체 지표)</h2>
-      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지표를 하나하나 고를 필요 없이, 지점·연도·월만 고르면 모든 지표를 같은 달 기준으로 한 번에 비교해요.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">지표를 하나하나 고를 필요 없이, 지점·연도·월(또는 시즌)만 고르면 모든 지표를 같은 기준으로 한 번에 비교해요.</p>
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+        <span style="font-size:12.5px;font-weight:700;">기준:</span>
+        <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="yoyUnitMode" value="month" checked> 월</label>
+        <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="yoyUnitMode" value="season"> 시즌 (3개월, 3~5월·6~8월·9~11월·12~2월)</label>
+      </div>
       <div class="grid-3" style="align-items:end;">
         <div class="field" style="margin:0;"><label>지점</label><select id="yoyBranch"></select></div>
         <div class="field" style="margin:0;"><label>연도 (올해)</label><select id="yoyYear"></select></div>
-        <div class="field" style="margin:0;"><label>월</label><select id="yoyMonth"></select></div>
+        <div class="field" style="margin:0;" id="yoyMonthWrap"><label>월</label><select id="yoyMonth"></select></div>
+        <div class="field" style="margin:0;display:none;" id="yoySeasonWrap"><label>시즌</label><select id="yoySeason"></select></div>
+      </div>
+      <div id="yoySeasonAggWrap" style="display:none;gap:16px;align-items:center;margin:10px 0 4px;flex-wrap:wrap;">
+        <span style="font-size:12.5px;font-weight:700;">시즌 3개월을 합칠 때:</span>
+        <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="yoySeasonAggMode" value="avg" checked> 평균</label>
+        <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="yoySeasonAggMode" value="sum"> 합계</label>
       </div>
       <div style="display:flex;gap:16px;align-items:center;margin:12px 0 4px;flex-wrap:wrap;">
         <span style="font-size:12.5px;font-weight:700;">비교 연도 수:</span>
@@ -4150,10 +4224,28 @@ async function renderMetricAnalysis(section) {
   }
 
   const tabCache = {}; // tabName -> parseMetricSheet 결과 (같은 탭 반복 파싱 방지)
+  let wideIndexCache = null;
+  function getWideIndex() {
+    if (!wideIndexCache) wideIndexCache = buildWideMetricIndex(sheetData);
+    return wideIndexCache;
+  }
   function getParsedTab(_unused, tabName) {
     if (tabCache[tabName]) return tabCache[tabName];
     const rows = (sheetData && sheetData[tabName]) || [];
-    const parsed = parseMetricSheet(rows);
+    // 지점별 탭이 있으면 그걸 기본으로 쓰고, "가로형"(연도·지표명·지점) 표에 이 지점 데이터가
+    // 있으면 거기서도 지표를 더 가져와 합칩니다. 지점별 탭이 아예 없어도(가로형 표만 있어도)
+    // 가로형 표의 데이터만으로 이 지점의 지표를 전부 구성할 수 있습니다.
+    const parsed = rows.length ? parseMetricSheet(rows) : { months: [], years: [], metrics: {}, metricOrder: [] };
+    const wide = getWideIndex();
+    const wideEntries = wide.byBranch[tabName];
+    if (wideEntries) {
+      wideEntries.forEach(({ metric, year, monthVals }) => {
+        if (!parsed.metrics[metric]) { parsed.metrics[metric] = {}; parsed.metricOrder.push(metric); }
+        parsed.metrics[metric][year] = monthVals;
+        if (!parsed.years.includes(year)) parsed.years.push(year);
+      });
+      if (!parsed.months.length) parsed.months = wide.months;
+    }
     tabCache[tabName] = parsed;
     return parsed;
   }
@@ -4258,6 +4350,15 @@ async function renderMetricAnalysis(section) {
     document.getElementById("yoyYear").innerHTML = years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
     document.getElementById("yoyYear").value = years[years.length - 1];
     document.getElementById("yoyMonth").innerHTML = stdMonths.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    document.getElementById("yoySeason").innerHTML = SEASON_DEFS.map(s => `<option value="${s.n}">${escapeHtml(s.label)}</option>`).join("");
+    document.querySelectorAll('input[name="yoyUnitMode"]').forEach(r => {
+      r.onchange = () => {
+        const mode = document.querySelector('input[name="yoyUnitMode"]:checked').value;
+        document.getElementById("yoyMonthWrap").style.display = mode === "month" ? "" : "none";
+        document.getElementById("yoySeasonWrap").style.display = mode === "season" ? "" : "none";
+        document.getElementById("yoySeasonAggWrap").style.display = mode === "season" ? "flex" : "none";
+      };
+    });
 
     // 순위
     document.getElementById("rankYear").innerHTML = years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
@@ -4526,11 +4627,14 @@ async function renderMetricAnalysis(section) {
       });
     }
     if (document.getElementById("yoyNoteBtn")) {
-      document.getElementById("yoyNoteBtn").onclick = () => openMetricNoteModal(null, {
-        branchLabel: document.getElementById("yoyBranch")?.value || "",
-        year: document.getElementById("yoyYear")?.value || "",
-        month: document.getElementById("yoyMonth")?.value || ""
-      });
+      document.getElementById("yoyNoteBtn").onclick = () => {
+        const yoyUnit = document.querySelector('input[name="yoyUnitMode"]:checked')?.value || "month";
+        openMetricNoteModal(null, {
+          branchLabel: document.getElementById("yoyBranch")?.value || "",
+          year: document.getElementById("yoyYear")?.value || "",
+          month: yoyUnit === "month" ? (document.getElementById("yoyMonth")?.value || "") : ""
+        });
+      };
     }
     if (document.getElementById("rankNoteBtn")) {
       document.getElementById("rankNoteBtn").onclick = () => openMetricNoteModal(null, {
@@ -4717,7 +4821,11 @@ async function renderMetricAnalysis(section) {
       const resultWrap = document.getElementById("metricResultWrap");
       const branch = document.getElementById("yoyBranch").value;
       const year = document.getElementById("yoyYear").value;
+      const unitMode = document.querySelector('input[name="yoyUnitMode"]:checked').value; // "month" 또는 "season"
       const month = document.getElementById("yoyMonth").value;
+      const seasonDef = SEASON_DEFS.find(s => s.n === parseInt(document.getElementById("yoySeason").value, 10));
+      const seasonAggMode = document.querySelector('input[name="yoySeasonAggMode"]:checked')?.value || "avg";
+      const periodLabel = unitMode === "season" ? seasonDef.label : month;
       const yearsMode = document.querySelector('input[name="yoyYearsMode"]:checked').value; // "2" 또는 "3"
       const prevYear = prevYearLabel(year);
       resultWrap.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
@@ -4739,13 +4847,15 @@ async function renderMetricAnalysis(section) {
           }
         }
         const rows = parsed.metricOrder.map(name => {
-          const values = yearLabels.map(y => aggregateMetric(parsed, name, y, [month], "avg"));
+          const values = yearLabels.map(y => unitMode === "season"
+            ? aggregateSeasonMetric(parsed, name, y, seasonDef, seasonAggMode)
+            : aggregateMetric(parsed, name, y, [month], "avg"));
           const first = values[0], last = values[values.length - 1];
           const diff = (first !== null && last !== null) ? last - first : null;
           const pct = (diff !== null && first) ? (diff / Math.abs(first)) * 100 : null;
           return { name, values: values.map(fmtMetricNum), diff, pct };
         });
-        resultWrap.innerHTML = `<p style="font-size:12.5px;color:var(--text-muted);margin:0 0 12px;"><strong>${escapeHtml(branch)}</strong> · ${escapeHtml(month)} 기준</p>` +
+        resultWrap.innerHTML = `<p style="font-size:12.5px;color:var(--text-muted);margin:0 0 12px;"><strong>${escapeHtml(branch)}</strong> · ${escapeHtml(periodLabel)} 기준${unitMode === "season" ? `(${seasonAggMode === "sum" ? "3개월 합계" : "3개월 평균"})` : ""}</p>` +
           fallbackNote + renderYoyDiffTable(yearLabels, rows);
       } catch (err) {
         resultWrap.innerHTML = `<div class="empty-state">비교 중 오류: ${escapeHtml(err.message)}</div>`;
@@ -4902,7 +5012,8 @@ async function renderMetricAnalysis(section) {
     return;
   }
 
-  const allTabNames = Object.keys(sheetData);
+  // "가로형"(연도·지표명·지점) 표에만 있고 실제 지점별 탭은 없는 지점도 지점 목록에 포함시킵니다.
+  const allTabNames = [...new Set([...Object.keys(sheetData), ...Object.keys(getWideIndex().byBranch)])];
   // 지표 형식(A열=지표명, B열=연도)이 아닌 탭(예: 코드/참고용 시트)은 지점 목록에서 자동으로 빼드려요.
   const tabNames = [];
   let firstParsed = null;
