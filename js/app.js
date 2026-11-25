@@ -3726,6 +3726,81 @@ function fmtMetricDiff(name, diff) {
   }
   return fmtMetricNum(Math.abs(diff));
 }
+// 두 지표가 같은 기간(지점 하나의 타임라인) 안에서 같이 움직이는 정도를 피어슨 상관계수(r, -1~1)로 계산합니다.
+function pearsonCorr(xs, ys) {
+  const n = xs.length;
+  if (n < 2) return null;
+  const mx = meanOf(xs), my = meanOf(ys);
+  let num = 0, dx2 = 0, dy2 = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    num += dx * dy; dx2 += dx * dx; dy2 += dy * dy;
+  }
+  const denom = Math.sqrt(dx2 * dy2);
+  return denom ? num / denom : null;
+}
+function corrStrengthLabel(r) {
+  if (r === null || r === undefined || Number.isNaN(r)) return "계산 불가 (한쪽 지표의 값이 전혀 변하지 않아요)";
+  const a = Math.abs(r);
+  if (a < 0.2) return "거의 상관관계 없음";
+  const dir = r > 0 ? "양(+)의 상관관계 (같이 늘고 같이 줄어요)" : "음(-)의 상관관계 (한쪽이 늘면 다른 쪽은 줄어요)";
+  const strength = a >= 0.7 ? "매우 강한" : a >= 0.4 ? "뚜렷한" : "약한";
+  return `${strength} ${dir}`;
+}
+// 두 지표의 월별 값 쌍({x,y,label})을 산점도로 그리고, 참고용 추세선(단순 선형회귀)을 함께 표시합니다.
+function renderScatterSVG(points, xLabel, yLabel) {
+  const width = 620, height = 360;
+  const padL = 60, padR = 20, padT = 20, padB = 50;
+  const xs = points.map(p => p.x), ys = points.map(p => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const rangeX = (maxX - minX) || 1, rangeY = (maxY - minY) || 1;
+  const xScale = (v) => padL + ((v - minX) / rangeX) * (width - padL - padR);
+  const yScale = (v) => height - padB - ((v - minY) / rangeY) * (height - padT - padB);
+
+  const mx = meanOf(xs), my = meanOf(ys);
+  let num = 0, den = 0;
+  points.forEach(p => { num += (p.x - mx) * (p.y - my); den += (p.x - mx) ** 2; });
+  const slope = den ? num / den : 0;
+  const intercept = my - slope * mx;
+
+  let svg = `<svg viewBox="0 0 ${width} ${height}" style="width:100%;max-width:${width}px;height:auto;">`;
+  for (let i = 0; i <= 4; i++) {
+    const vy = minY + (maxY - minY) * (i / 4);
+    const y = yScale(vy);
+    svg += `<line x1="${padL}" y1="${y}" x2="${width - padR}" y2="${y}" stroke="#E5EDE0" stroke-width="1"/>`;
+    svg += `<text x="${padL - 8}" y="${y + 4}" font-size="10" fill="#8A9A82" text-anchor="end">${escapeHtml(fmtMetricNum(vy))}</text>`;
+  }
+  for (let i = 0; i <= 4; i++) {
+    const vx = minX + (maxX - minX) * (i / 4);
+    const x = xScale(vx);
+    svg += `<text x="${x}" y="${height - padB + 16}" font-size="10" fill="#8A9A82" text-anchor="middle">${escapeHtml(fmtMetricNum(vx))}</text>`;
+  }
+  const y1 = slope * minX + intercept, y2 = slope * maxX + intercept;
+  svg += `<line x1="${xScale(minX)}" y1="${yScale(y1)}" x2="${xScale(maxX)}" y2="${yScale(y2)}" stroke="#F5A623" stroke-width="2" stroke-dasharray="5,4"/>`;
+  points.forEach(p => {
+    svg += `<circle cx="${xScale(p.x)}" cy="${yScale(p.y)}" r="4.5" fill="#2979FF" fill-opacity="0.78"><title>${escapeHtml(p.label)}: ${escapeHtml(xLabel)} ${escapeHtml(fmtMetricNum(p.x))} / ${escapeHtml(yLabel)} ${escapeHtml(fmtMetricNum(p.y))}</title></circle>`;
+  });
+  svg += `<text x="${(padL + width - padR) / 2}" y="${height - 8}" font-size="11" fill="#444" text-anchor="middle" font-weight="700">${escapeHtml(xLabel)}</text>`;
+  svg += `<text x="14" y="${(padT + height - padB) / 2}" font-size="11" fill="#444" text-anchor="middle" font-weight="700" transform="rotate(-90 14 ${(padT + height - padB) / 2})">${escapeHtml(yLabel)}</text>`;
+  svg += `</svg>`;
+  return svg;
+}
+function renderCorrResult(branch, metricA, metricB, paired, r) {
+  const rText = (r === null || r === undefined || Number.isNaN(r)) ? "-" : r.toFixed(2);
+  return `<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start;">
+      <div style="flex:1;min-width:260px;">
+        <p style="font-size:12.5px;color:var(--text-muted);margin:0 0 8px;"><strong style="color:var(--text);">${escapeHtml(branch)}</strong> · ${escapeHtml(metricA)} × ${escapeHtml(metricB)} (같이 값 있는 ${paired.length}개월 기준)</p>
+        <div style="font-size:30px;font-weight:800;color:var(--blue-deep);">r = ${rText}</div>
+        <p style="font-size:13px;font-weight:700;margin-top:4px;">${escapeHtml(corrStrengthLabel(r))}</p>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.5;">상관계수(r)는 -1~1 사이 값이에요. 1에 가까울수록 두 지표가 같이 늘고 줄고, -1에 가까울수록 한쪽이 늘 때 다른 쪽이 줄어드는 관계라는 뜻이고, 0에 가까우면 뚜렷한 관계가 없다는 뜻이에요. 다만 이건 "같이 움직이는 경향"을 보여줄 뿐 한쪽이 다른 쪽의 원인이라는 걸 증명하는 건 아니라는 점은 참고해주세요.</p>
+      </div>
+      <div style="flex:1.3;min-width:320px;">${renderScatterSVG(paired, metricA, metricB)}</div>
+    </div>
+    <table style="margin-top:18px;"><thead><tr><th>시점</th><th>${escapeHtml(metricA)}</th><th>${escapeHtml(metricB)}</th></tr></thead><tbody>
+      ${paired.map(p => `<tr><td>${escapeHtml(p.label)}</td><td class="mono">${escapeHtml(fmtMetricNum(p.x))}</td><td class="mono">${escapeHtml(fmtMetricNum(p.y))}</td></tr>`).join("")}
+    </tbody></table>`;
+}
 function renderLineChartSVG(seriesList, opts) {
   opts = opts || {};
   const width = opts.width || 900, height = opts.height || 260;
@@ -3875,9 +3950,9 @@ async function renderMetricAnalysis(section) {
     ${isLeader ? `
     <div class="card">
       <h2>엑셀 파일 업로드</h2>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">엑셀 파일(.xlsx)을 올리면 그 안의 모든 탭을 한 번에 읽어서 저장해요. 나중에 데이터가 바뀌면 새 파일을 다시 올려서 덮어쓰시면 돼요 (구글 계정 연결 없이 바로 반영돼요).</p>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">엑셀 파일(.xlsx)을 올리면 그 안의 모든 탭을 한 번에 읽어서 저장해요. 나중에 데이터가 바뀌면 새 파일을 다시 올려서 덮어쓰시면 돼요 (구글 계정 연결 없이 바로 반영돼요). Apps Script로 구글시트 자동 동기화를 설정해두면 이 버튼을 누르지 않아도 매일 자동으로 최신 데이터가 반영돼요 (<code>tools/metric_analysis_sync.gs</code> 참고) — 수동 업로드는 그 사이에 급하게 반영하고 싶을 때만 쓰시면 돼요.</p>
       <input type="file" id="metricFileInput" accept=".xlsx,.xls">
-      <p id="metricUploadStatus" style="font-size:12px;color:var(--text-muted);margin-top:8px;">${folder?.sheetFileName ? `현재 연결된 파일: <strong>${escapeHtml(folder.sheetFileName)}</strong> (${escapeHtml((folder.sheetUpdatedAt || "").slice(0, 16).replace("T", " "))} 업로드)` : ""}</p>
+      <p id="metricUploadStatus" style="font-size:12px;color:var(--text-muted);margin-top:8px;">${folder?.sheetFileName ? `현재 연결된 데이터: <strong>${escapeHtml(folder.sheetFileName)}</strong> (${escapeHtml((folder.sheetUpdatedAt || "").slice(0, 16).replace("T", " "))} ${folder.sheetFileName.includes("자동 동기화") ? "자동 갱신" : "업로드"})` : ""}</p>
       <p style="font-size:11px;color:var(--text-muted);margin:6px 0 0;">각 탭은 A열=지표명, B열=연도, C열부터 1~12월 값 형식이어야 해요.</p>
     </div>` : (!folder?.sheetFileName ? `<div class="card"><div class="empty-state">아직 팀장이 연결한 파일이 없습니다.</div></div>` : "")}
     <div id="metricModeToggle" style="display:none;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
@@ -3885,6 +3960,7 @@ async function renderMetricAnalysis(section) {
       <button class="btn small secondary" id="modeDashBtn" type="button">요약 대시보드</button>
       <button class="btn small secondary" id="modeTrendBtn" type="button">시간 추이 그래프</button>
       <button class="btn small secondary" id="modeTwoBtn" type="button">두 기준 비교</button>
+      <button class="btn small secondary" id="modeCorrBtn" type="button">지표 상관관계</button>
       ${canViewAllRole() ? `<button class="btn small secondary" id="modeAllBtn" type="button">지표별 전체 지점 비교</button>` : ""}
       <button class="btn small secondary" id="modeYoyBtn" type="button">전년 대비 증감률(YoY)</button>
       ${canViewAllRole() ? `<button class="btn small secondary" id="modeRankBtn" type="button">지점 순위</button>` : ""}
@@ -3933,6 +4009,18 @@ async function renderMetricAnalysis(section) {
         ${canWriteSection(section) ? `<button class="btn small secondary" id="twoNoteBtn" type="button">기록</button>` : ""}
         <button class="btn" id="metricCompareBtn" type="button" style="width:auto;padding:10px 24px;margin-left:auto;">비교하기</button>
       </div>
+    </div>
+
+    <div class="card" id="metricCorrCard" style="display:none;">
+      <h2>지표 상관관계 분석</h2>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">한 지점 안에서 서로 다른 지표 두 개가 시간에 따라 같이 움직이는 경향이 있는지(상관관계) 확인해요. 예: 튜터비용과 콤마수, DB유입수와 등록율. 분석할 지표가 아직 이 엑셀에 없다면, 손익계산서·고객지표 자료에서 월별 값을 가져와 같은 엑셀의 해당 지점 탭에 지표 한 줄로 추가해서 올려주세요.</p>
+      <div class="grid-3" style="align-items:end;">
+        <div class="field" style="margin:0;"><label>지점</label><select id="corrBranch"></select></div>
+        <div class="field" style="margin:0;"><label>지표 A</label><select id="corrMetricA"></select></div>
+        <div class="field" style="margin:0;"><label>지표 B</label><select id="corrMetricB"></select></div>
+      </div>
+      <button class="btn" id="corrRunBtn" type="button" style="width:auto;padding:10px 24px;margin-top:12px;">상관관계 분석하기</button>
+      ${canWriteSection(section) ? `<button class="btn small secondary" id="corrNoteBtn" type="button" style="width:auto;padding:10px 18px;margin-top:12px;margin-left:8px;">기록</button>` : ""}
     </div>
 
     <div class="card" id="metricAllCard" style="display:none;">
@@ -4085,8 +4173,8 @@ async function renderMetricAnalysis(section) {
   let loadAndRenderMetricNotesG = null; // initAllViews 안에서 정의되므로, 밖에 있는 "분석 기록" 탭 버튼이 참조할 수 있게 여기에 담아둡니다.
 
   function setCompareMode(mode) {
-    const cards = { dash: "metricDashboardCard", trend: "metricTrendCard", two: "metricCompareCard", all: "metricAllCard", yoy: "metricYoyCard", rank: "metricRankCard", anomaly: "metricAnomalyCard", note: "metricNoteCard" };
-    const btns = { dash: "modeDashBtn", trend: "modeTrendBtn", two: "modeTwoBtn", all: "modeAllBtn", yoy: "modeYoyBtn", rank: "modeRankBtn", anomaly: "modeAnomalyBtn", note: "modeNoteBtn" };
+    const cards = { dash: "metricDashboardCard", trend: "metricTrendCard", two: "metricCompareCard", corr: "metricCorrCard", all: "metricAllCard", yoy: "metricYoyCard", rank: "metricRankCard", anomaly: "metricAnomalyCard", note: "metricNoteCard" };
+    const btns = { dash: "modeDashBtn", trend: "modeTrendBtn", two: "modeTwoBtn", corr: "modeCorrBtn", all: "modeAllBtn", yoy: "modeYoyBtn", rank: "modeRankBtn", anomaly: "modeAnomalyBtn", note: "modeNoteBtn" };
     Object.keys(cards).forEach(k => {
       const cardEl = document.getElementById(cards[k]);
       const btnEl = document.getElementById(btns[k]);
@@ -4101,6 +4189,7 @@ async function renderMetricAnalysis(section) {
   document.getElementById("modeDashBtn").onclick = () => setCompareMode("dash");
   document.getElementById("modeTrendBtn").onclick = () => setCompareMode("trend");
   document.getElementById("modeTwoBtn").onclick = () => setCompareMode("two");
+  document.getElementById("modeCorrBtn").onclick = () => setCompareMode("corr");
   if (document.getElementById("modeAllBtn")) document.getElementById("modeAllBtn").onclick = () => setCompareMode("all");
   document.getElementById("modeYoyBtn").onclick = () => setCompareMode("yoy");
   if (document.getElementById("modeRankBtn")) document.getElementById("modeRankBtn").onclick = () => setCompareMode("rank");
@@ -4128,6 +4217,12 @@ async function renderMetricAnalysis(section) {
       document.querySelector(`.gAMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
       document.querySelector(`.gBMonthChk[value="${CSS.escape(months[0])}"]`).checked = true;
     }
+
+    // 지표 상관관계
+    document.getElementById("corrBranch").innerHTML = branchOptionsFor(tabNames).map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+    document.getElementById("corrMetricA").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    document.getElementById("corrMetricB").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+    if (firstParsed.metricOrder.length > 1) document.getElementById("corrMetricB").value = firstParsed.metricOrder[1];
 
     // 지표별 전체 지점 비교
     document.getElementById("allMetricSelect").innerHTML = firstParsed.metricOrder.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
@@ -4410,6 +4505,11 @@ async function renderMetricAnalysis(section) {
         month: document.querySelector(".gAMonthChk:checked")?.value || ""
       });
     }
+    if (document.getElementById("corrNoteBtn")) {
+      document.getElementById("corrNoteBtn").onclick = () => openMetricNoteModal(null, {
+        branchLabel: document.getElementById("corrBranch")?.value || ""
+      });
+    }
     if (document.getElementById("allNoteBtn")) {
       document.getElementById("allNoteBtn").onclick = () => openMetricNoteModal(null, {
         branchLabel: "전체",
@@ -4458,11 +4558,21 @@ async function renderMetricAnalysis(section) {
           const up = diff !== null && diff > 0, down = diff !== null && diff < 0;
           const tone = up ? "#E03C3C" : down ? "#2979FF" : "var(--text-muted)";
           const arrow = up ? "▲" : down ? "▼" : "-";
+          // 전년비: 같은 달(12칸 전) 기준으로 비교합니다. (stdMonths가 연도당 12개라 idx-12가 항상 "작년 같은 달"이 됩니다)
+          const yoyPrev = (idx >= 12 && full[idx - 12]) ? full[idx - 12].value : null;
+          const yoyDiff = (cur !== null && yoyPrev !== null) ? cur - yoyPrev : null;
+          const yoyPct = (yoyDiff !== null && yoyPrev) ? (yoyDiff / Math.abs(yoyPrev)) * 100 : null;
+          const yoyUp = yoyDiff !== null && yoyDiff > 0, yoyDown = yoyDiff !== null && yoyDiff < 0;
+          const yoyTone = yoyUp ? "#E03C3C" : yoyDown ? "#2979FF" : "var(--text-muted)";
+          const yoyArrow = yoyUp ? "▲" : yoyDown ? "▼" : "-";
           const spark = idx >= 0 ? full.slice(Math.max(0, idx - 11), idx + 1) : full.slice(-12);
           return `<div class="stat-card">
             <div class="label">${escapeHtml(name)}</div>
             <div class="value">${fmtMetricNum(cur)}</div>
-            <div class="mono" style="font-size:12px;color:${tone};font-weight:700;margin-top:2px;">${pct !== null ? `${arrow} ${Math.abs(pct).toFixed(1)}% (전월비)` : "전월 비교 불가"}</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:2px;">
+              <div class="mono" style="font-size:12px;color:${tone};font-weight:700;">${pct !== null ? `${arrow} ${Math.abs(pct).toFixed(1)}% (전월비)` : "전월 비교 불가"}</div>
+              <div class="mono" style="font-size:12px;color:${yoyTone};font-weight:700;">${yoyPct !== null ? `${yoyArrow} ${Math.abs(yoyPct).toFixed(1)}% (전년비)` : "전년 비교 불가"}</div>
+            </div>
             <div style="margin-top:8px;">${renderSparklineSVG(spark, "#3B9BE8")}</div>
           </div>`;
         }).join("")}</div>`;
@@ -4517,6 +4627,33 @@ async function renderMetricAnalysis(section) {
         resultWrap.innerHTML = renderDiffTable(["지표", labelA, labelB, "증감", "증감율"], results.map(r => [r.name, fmtMetricNum(r.valA), fmtMetricNum(r.valB), r.diff, r.pct]));
       } catch (err) {
         resultWrap.innerHTML = `<div class="empty-state">비교 중 오류: ${escapeHtml(err.message)}</div>`;
+      }
+    };
+
+    // ---------- 지표 상관관계 분석 실행 ----------
+    document.getElementById("corrRunBtn").onclick = async () => {
+      const resultWrap = document.getElementById("metricResultWrap");
+      const branch = document.getElementById("corrBranch").value;
+      const metricA = document.getElementById("corrMetricA").value;
+      const metricB = document.getElementById("corrMetricB").value;
+      if (metricA === metricB) { resultWrap.innerHTML = `<div class="empty-state">서로 다른 지표 두 개를 골라주세요.</div>`; return; }
+
+      resultWrap.innerHTML = `<div class="empty-state">분석 중...</div>`;
+      try {
+        const parsed = await getParsedTab(spreadsheetId, branch);
+        const timelineA = buildTimeline(parsed, metricA);
+        const timelineB = buildTimeline(parsed, metricB);
+        const paired = timelineA
+          .map((p, i) => ({ label: p.label, x: p.value, y: timelineB[i] ? timelineB[i].value : null }))
+          .filter(p => p.x !== null && p.x !== undefined && p.y !== null && p.y !== undefined);
+        if (paired.length < 3) {
+          resultWrap.innerHTML = `<div class="empty-state">${escapeHtml(branch)}의 "${escapeHtml(metricA)}"와 "${escapeHtml(metricB)}"가 둘 다 값이 있는 달이 ${paired.length}개월뿐이라 상관관계를 계산하기엔 부족해요. 최소 3개월치 데이터가 같이 있어야 해요. (지표가 아직 엑셀에 없다면 손익계산서·고객지표 자료를 보고 해당 지점 탭에 월별 값으로 추가해주세요)</div>`;
+          return;
+        }
+        const r = pearsonCorr(paired.map(p => p.x), paired.map(p => p.y));
+        resultWrap.innerHTML = renderCorrResult(branch, metricA, metricB, paired, r);
+      } catch (err) {
+        resultWrap.innerHTML = `<div class="empty-state">분석 중 오류: ${escapeHtml(err.message)}</div>`;
       }
     };
 
@@ -5637,6 +5774,7 @@ function openMenuEditModal(item) {
           </select>
           <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">이미 등록된 게시물이 있는 상태에서 종류를 바꾸면 예전 글이 새 양식으로 안 보일 수 있어요.</p>
         </div>` : ""}
+        ${item.isCustom ? `<p style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">폴더 ID (Apps Script 자동 연동 등에 쓰는 값): <span class="mono" style="user-select:all;">${escapeHtml(item.folderDocId)}</span></p>` : ""}
         <div class="grid-2" style="margin-top:10px;">
           <button type="button" class="btn secondary" id="cancelBtn">취소</button>
           <button type="submit" class="btn">저장</button>
